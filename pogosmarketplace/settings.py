@@ -40,6 +40,7 @@ INSTALLED_APPS = [
     'category',
     'accounts',
     'store',
+    'carts',
 ]
 
 MIDDLEWARE = [
@@ -65,8 +66,11 @@ TEMPLATES = [
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
 
-                # This is the context processor that adds the list of categories to the context of all templates
-                'category.context_processors.menu_links',  
+                # This is the context processor that adds the list of categories to the context of all templates(in all pages of our website)
+                'category.context_processors.menu_links',
+
+                # This is the context processor that makes for the 'cart' icon along with its counter to keep appearing in all pages of our website
+                'carts.context_processors.counter',
             ],
         },
     },
