@@ -7,6 +7,7 @@ from django.contrib.auth.models import AbstractBaseUser, BaseUserManager
 class MyAccountManager(BaseUserManager):
 
     # creating a normal user:
+    # only core fields are here, thus you will notice that 'phone_number' is not present here, since 'phone_number' is set to 'blank=True'(optional) in the Account class model below.
     def create_user(self, first_name, last_name, username, email, password=None):
         if not email: 
             raise ValueError('User must have an email address')
@@ -54,6 +55,8 @@ class Account(AbstractBaseUser):
     last_name = models.CharField(max_length=30)
     username = models.CharField(max_length=30, unique=True)
     email = models.EmailField(max_length=254, unique=True)
+
+    # since 'phone_number' can be blank as set below, in the 'create_user' function above, 'phone number' is not there since it is optional and not a core field
     phone_number = models.CharField(max_length=15, blank=True)
     
     # Required fields
@@ -68,11 +71,11 @@ class Account(AbstractBaseUser):
     # 'USERNAME FIELD' here means to specify the content expected in the default 'USERNAME' field when 'logging in' to the admin. This overides the default 'USERNAME' field expected to be filled in, with 'EMAIL'.
     USERNAME_FIELD = 'email'
 
-    # This is the required filled expected to filled by the user when 'signing up' for access to the custom django user admin page:
+    # This is the required filled expected to be filled by the user when 'signing up' for access to the custom django user admin page:
     REQUIRED_FIELDS = ['username', 'first_name', 'last_name']
 
     # telling this model 'Account', that it is being used in another model above called 'MyAccountManager':
-    object = MyAccountManager()
+    objects = MyAccountManager()
 
     def __str__(self):
         return self.email

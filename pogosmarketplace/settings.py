@@ -11,10 +11,15 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 from pathlib import Path
+import os
+from dotenv import load_dotenv
+
+
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+load_dotenv()
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
@@ -153,6 +158,37 @@ STATICFILES_DIRS = [
 MEDIA_URL = '/media/'
 
 MEDIA_ROOT = BASE_DIR /'media'
+
+
+# Search for 'django messages' online, and check for the documentation and copy this and edit it as per your needs:
+from django.contrib.messages import constants as messages
+
+MESSAGE_TAGS = {
+    messages.ERROR: "danger",
+}
+
+
+#--------------------SMTP CONFIGURATION:----------------------
+# This is the email backend that will be used to send emails. In this case, it is set to use SMTP (Simple Mail Transfer Protocol).
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+
+# This is the SMTP server that will be used to send emails. In this case, it is set to Gmail's SMTP server.
+EMAIL_HOST = 'smtp.gmail.com'
+
+# This is the port number for the SMTP server. 587 is commonly used for TLS.
+EMAIL_PORT = 587
+
+# This is the email address that will be used to send emails from your application.
+EMAIL_HOST_USER = 'aerotrade001@gmail.com'
+
+# Use environment variables for sensitive information like passwords. The password is stored in a .env file in root directory for security.
+EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD')
+
+# This is used to send emails using TLS (Transport Layer Security) for secure communication.
+EMAIL_USE_TLS = True
+
+EMAIL_TIMEOUT = 30
+
 
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'

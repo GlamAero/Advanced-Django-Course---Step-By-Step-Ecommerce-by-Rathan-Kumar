@@ -3,10 +3,17 @@ Email: aerotrade001@gmail.com
 Username: Aerosmart1
 Password: Ayobami1
 
+for the second one we created:
+Email: tejuojoayodeji@yahoo.com
+Username: tejuojoayodeji
+Password: Aerosmart777
+
 
 THE PROJECT NAME IS 'pogosmarketplace'
 
 The project command line is 'git bash'
+
+The virtual environment name is 'env'
 
 for 'gitignore' file, search for 'gitignore.io' on google and input Django on the site's search bar. Copy all that is in the file and paste into our project's '.gitignore' file.
 
