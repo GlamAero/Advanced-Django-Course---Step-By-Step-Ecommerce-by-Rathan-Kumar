@@ -16,8 +16,15 @@ def counter(request):
         try:
             cart = Cart.objects.filter(cart_id=_cart_id(request))
 
-            # 'cart[:1]' retrieves the first cart object from the queryset.
-            cart_items = CartItem.objects.filter(cart=cart[:1])
+            # if the current user is logged in:
+            if request.user.is_authenticated:
+
+                # get all the cart_items where the user is the currently logged in user:
+                cart_items = CartItem.objects.filter(user=request.user)
+            
+            else:
+                # 'cart[:1]' retrieves the first cart object from the queryset.
+                cart_items = CartItem.objects.filter(cart=cart[:1])
             for cart_item in cart_items:
                 cart_count += cart_item.quantity
 

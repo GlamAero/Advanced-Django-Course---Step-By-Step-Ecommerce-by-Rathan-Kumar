@@ -1,4 +1,5 @@
-FOR SUPERUSER:
+FOR SUPERUSER: 
+remember that we log in using email for the admin
 Email: aerotrade001@gmail.com
 Username: Aerosmart1
 Password: Ayobami1
@@ -6,7 +7,17 @@ Password: Ayobami1
 for the second one we created:
 Email: tejuojoayodeji@yahoo.com
 Username: tejuojoayodeji
-Password: Aerosmart777
+Password: Aerosmart777#
+
+THIS PROJECT TERMINAL IS THE GIT BASH
+
+NOTE: 1. CART: the cart related to the session created to hold all cart_items.
+      2. CART_ITEM: the product item(e.g '3' quantities of Air Jordan canvass ) with all its variations(size: 4 and color: blue) added to the cart by the user.
+      3. ITEM: each variation(e.g size) of the CART_ITEM.
+	    
+
+
+GOOGLE APP PASSWORD(for this web app): xocthptmzwilivzm
 
 
 THE PROJECT NAME IS 'pogosmarketplace'

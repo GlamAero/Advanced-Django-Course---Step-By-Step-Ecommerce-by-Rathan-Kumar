@@ -3,7 +3,10 @@ from .forms import RegistrationForm
 from .models import Account
 from django.contrib import messages, auth
 from django.contrib.auth.decorators import login_required
-from django.http import HttpResponse
+from carts.models import Cart, CartItem
+from carts.views import _cart_id
+import requests
+
 
 # Verification email imports:
 from django.contrib.sites.shortcuts import get_current_site
@@ -105,11 +108,106 @@ def login(request):
         # Authenticate the user
         user = auth.authenticate(request, username=email, password=password)
         
+        # If the user is found in the database:
         if user is not None:
-            # If the user is found in the database, log them in
+            try:
+                # get the cart objects and cart_items of the user whose accounts details is found in the database from the database
+                cart = Cart.objects.get(cart_id=_cart_id(request))
+
+                is_cart_item_exists = CartItem.objects.filter(cart=cart).exists()
+
+                # BEFORE LOGGING A USER IN, CHECK IF THERE IS/ARE CART ITEMS ASSOCIATED WITH A CART OF A UNIQUE 'cart_id' AS ABOVE:
+                if is_cart_item_exists:
+
+                    # use the 'cart' alone to get the CartItem objects. 
+                    # That is 'cart_item' here is all the items in a particular cart of a unique 'cart_id' (e.g AIR JORDAN of color: blue and size: medium;  RTX SHIRT of color: red and size: small;  VIVO JEANS of color: green and size: large etc.).
+                    # This cart item is not yet linked to a user
+                    cart_item = CartItem.objects.filter(cart=cart)
+
+
+                    # GETTING THE PRODUCT VARIATION BY 'cart_id':
+
+                    product_variation = []
+
+                    # for each item(e.g Air Jordan of color: blue and size: medium of quantity: 3) in the particular cart of a unique cart_id
+                    for item in cart_item:
+
+                        # 'item.variations.all' here return all the variations of each product in the cart. (For example color: blue and size: medium  -- for RTX SHIRT)
+                        variation = item.variations.all()
+                        
+                        product_variation.append(list(variation))
+
+
+                    # FOR A USER WHO IS ABOUT TO LOG IN, GET THE Cart_Item OF THE USER TO ACCESS HIS PRODUCT VARIATION:
+                    cart_item = CartItem.objects.filter(user=user) 
+
+                    ex_var_list = [] # Stores variations of each cart item
+                    id = [] # Stores IDs of cart items
+
+                    # From the above, 'cart_item' is a collection (queryset) of CartItem objects (e.g Air Jordan of color: Black and size: Medium, Air Jordan of color: White and size: Medium, Air Jordan of color: Yellow and size: Large) that the user who is logging in has in their cart
+
+                    # Here, 'item' represents each individual CartItem during iteration (e.g. Air Jordan of color: Black and size: Medium) that the user who is about logging in has in their cart
+                    for item in cart_item:
+
+                        # this means the all the variations of each item in the cart of the user about to log in(e.g color: black, size: red, etc of product ATX Shirt that was added to cart previously by the user in the previous cart_session)
+                        existing_variation = item.variations.all()
+                        
+                        ex_var_list.append(list(existing_variation))
+
+                        id.append(item.id)
+
+                        # for each item variation in the list of variations in a given cart before log in:
+                    for pr in product_variation:
+
+                        # if an item variation(that is in the list of variations in a given cart before log in) is found in the list of item variations of a particular user(when they previously logged in and added to cart):
+                        if pr in ex_var_list:
+
+                            index = ex_var_list.index(pr)
+
+                            item_id = id[index]
+
+                            item = CartItem.objects.get(id  = item_id)
+
+                            item.quantity += 1
+
+                            item.user = user
+
+                            item.save()
+
+                            # if an item variation(that is in the list of variations in a given cart before log in) is not found in the list of item variations of a particular user(when they previously logged in and added to cart):
+                        else:
+                            cart_item = CartItem.objects.filter(cart=cart)
+
+                            for item in cart_item:
+                                item.user = user
+                                item.save()  
+                    
+            except:
+                pass
+
+            # log them in
             auth.login(request, user)
             messages.success(request, "You are now logged in")
-            return redirect('dashboard')
+
+            # IF WE ARE VISITING ANY PAGE WHICH REQUIRES TO LOGIN FIRST TO VIEW THE PAGE:
+            # the below will hold the url of any previous page was referring to(or was trying to get access to) which requires login(for example, if a user who is not logged in is trying to access the checkout page after adding to cart, he or she would be redirected to 'login' page and thereafter 'dashboard' page which 'login' page leads to. 
+            # However, with this, this url now holds the original url(e.g checkout) which the user intended to go to
+            url = request.META.get('HTTP_REFERER')
+
+            try:
+                
+                query = requests.utils.urlparse(url).query # next=/cart/checkout/
+                
+                # the below converts the query above to a dictionary:
+                params = dict(x.split('=') for x in query.split('&')) # {'next': '/cart/checkout/'}
+
+                if 'next' in params:
+                    nextPage = params['next']
+                    return redirect(nextPage)
+
+            except:
+                return redirect('dashboard')
+            
         else:
             messages.error(request, "Invalid login credentials")
             return redirect('login')

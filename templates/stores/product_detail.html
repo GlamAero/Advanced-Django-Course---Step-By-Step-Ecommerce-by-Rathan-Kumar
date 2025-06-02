@@ -44,7 +44,8 @@
                                             {% for i in single_product.variation_set.colors %}
 
                                                 <!--'variation_value' is a field in the 'Variation' class in 'store/models.py'-->
-                                                <!--'variation_value' is used to store the specific value of the variation (e.g., red, blue for color category-->
+                                                <!--'variation_value' is used to store the specific value of the variation (e.g. red, blue for color category or small, large for size category-->
+                                                <!--'lower' means to make the letters lower case, while 'capfirst' means to make the first letter of the word capitalized-->
                                                 <option value="{{ i.variation_value | lower }}">{{ i.variation_value | capfirst }}</option>
 
                                             {% endfor %}
@@ -64,7 +65,8 @@
                                             {% for i in single_product.variation_set.sizes %}
 
                                                 <!--'variation_value' is a field in the 'Variation' class in 'store/models.py'-->
-                                                <!--'variation_value' is used to store the specific value of the variation (e.g., small, big for size category-->
+                                                <!--'variation_value' is used to store the specific value of the variation (e.g. red, blue for color category or small, large for size category-->
+                                                <!--'lower' means to make the letters lower case, while 'capfirst' means to make the first letter of the word capitalized-->
                                                 <option value="{{ i.variation_value | lower }}">{{ i.variation_value | capfirst }}</option>
 
                                             {% endfor %}
@@ -78,8 +80,11 @@
                                     <h5 class="text-danger">Out of Stock</h5>
                                 {% else %}
                                     
-                                        <!--'single_product' is in product_detail function in views.py file of store app'-->
-                                        <button type="submit" class="btn  btn-primary"> <span class="text">Add to cart</span> <i class="fas fa-shopping-cart"></i>  </button>
+                                    <!--'single_product' is in product_detail function in views.py file of store app'-->
+                                    <button type="submit" class="btn  btn-primary"> 
+                                        <span class="text">Add to cart</span> 
+                                        <i class="fas fa-shopping-cart"></i>
+                                    </button>
                                 {% endif %}
                             </article> <!-- product-info-aside .// -->
                         </form>
