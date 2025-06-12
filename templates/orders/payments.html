@@ -1,0 +1,293 @@
+<!--COPY THE CODE FROM 'stores/cart.html' and edit-->
+{% extends 'base.html' %}
+
+{% load static %}
+
+{% block content %}
+    <section class="section-content padding-y bg">
+        <div class="container">
+
+            <!-- ============================ COMPONENT 1 ================================= -->
+            <h4 class="text-center mb-10 ">Review Your Order and Make Payment</h4>
+
+            <div class="row">
+
+                <aside class="col-lg-8">
+
+                    <!--The below is got from bootstrap, in the card section-->
+                    <div class="card">
+                        <h5 class="card-header">Billing Address</h5>
+                        <div class="card-body">
+
+                            <!--'full_name', as a function(def full_name) is got in 'orders/models' at the 'def__str__' area-->
+                            <p class="card-text mb-0">{{ order.full_name }}</p>
+                            <p class="card-text mb-0">{{ order.full_address }}</p>
+                            <p class="card-text mb-0">{{ order.city }}, {{ order.state }}</p>
+                            <p class="card-text mb-0">{{ order.country }}</p>
+                            <p class="card-text mb-0">{{ order.email }}</p>
+                            <p class="card-text mb-0">{{ order.phone }}</p>
+
+
+
+                            {% if order.order_note %}
+                                <b>Order Note: </b> {{ order.order_note }}
+                            {% endif %}
+
+                        </div>
+                    </div> <!-- card.// -->
+
+                    <div class="card">
+                        <h5 class="card-header">Payment Method</h5>
+                        <div class="card-body">
+                            <p class="card-text">PayPal</p>
+                        </div>
+                    </div> <!-- card.// -->
+
+                    <div class="card">
+                        <h5 class="card-header">Review Product</h5>
+                        <div class="card-body">
+
+                                <!--Copy the below from 'stores/checkout.html'-->
+                            <table class="table table-borderless table-shopping-cart">
+
+                                <thead class="text-muted">
+                                    <tr class="small text-uppercase">
+                                        <th scope="col">Product</th>
+                                        <th scope="col" width="120">Quantity</th>
+                                        <th scope="col" width="120">Price</th>
+                                    </tr>
+                                </thead>
+
+                                <tbody>
+
+                                    {% for cart_item in cart_items %}
+                                        <tr>
+                                            <td>
+                                                <figure class="itemside align-items-center">
+                                                    <div class="aside">
+                                                        <img src="{{ cart_item.product.images.url }}" class="img-sm" alt="">
+                                                    </div>
+                                                    <figcaption class="info">
+
+                                                        <!-- 'get_url' is a method in the models.py file of the store app. It returns the url of the named product. It returns the 'product_detail' function as in 'store/models' -->
+                                                        <a href="{{ cart_item.product.get_url }}" class="title text-dark">{{ cart_item.product.product_name }}</a>
+
+                                                        <!--to check if the cart_item has variations(e.g size:small) and if it does, give the corresponding variation category('size') and value('small'):-->
+                                                        <p class="text-muted small">
+                                                            {% if cart_item.variations.all%} 
+                                                                {% for item in cart_item.variations.all %} 
+                                                                    {{ item.variation_category | capfirst }} : {{ item.variation_value | capfirst }} <br>
+                                                                {% endfor %} 
+                                                            {% endif %}</p>
+                                                    </figcaption>
+                                                </figure>
+                                            </td>
+                                            <td> 
+                                            <!-- col.// -->
+                                                <label for="">{{cart_item.quantity}}</label>    
+
+                                            </td>
+                                            <td> 
+                                                <div class="price-wrap"> 
+                                                    <var class="price">${{ cart_item.sub_total }}</var> 
+                                                    <small class="text-muted">${{ cart_item.product.price }}</small> 
+                                                </div> <!-- price-wrap .// -->
+                                            </td>
+                                            
+                                        </tr>
+                                    {% endfor %}
+                                        
+                                </tbody>
+                            
+                            </table>
+
+                            </p>
+                        </div>
+                    </div> <!-- card.// -->
+
+                </aside> <!-- col.// -->
+
+                <aside class="col-lg-4">
+
+                    <div class="card">
+                        <div class="card-body">
+                            <dl class="dlist-align">
+                                <dt>Total price:</dt>
+                                <dd class="text-right">{{ total }}</dd>
+                            </dl>
+                            <dl class="dlist-align">
+                                <dt>Tax:</dt>
+                                <dd class="text-right">${{ tax }}</dd>
+                            </dl>
+                            <dl class="dlist-align">
+                                <dt>Grand Total:</dt>
+                                <dd class="text-right text-dark b"><strong>${{ grand_total }}</strong></dd>
+                            </dl>
+                            <hr>
+                            <p class="text-center mb-3">
+                                <img src="{% static 'images/misc/payments.png' %}" height="26">
+                            </p>
+
+                            
+                            <!--PAYPAL-->
+                            <!--GET THE BELOW FROM PAYPAL WEBSITE(go to the browser and search 'paypal  button integration', you will see may options but choose the link with server as the option where you will see the below code to copy from)--><!--THEN PUT THE 'PAYPAL SCRIPT' CODE IN 'base.html'-->
+                            <!-- Set up a container element for the button -->
+                            <div id="paypal-button-container">
+                                <!--PayPal button will load-->                                
+                            </div>
+
+
+                        </div> <!-- card-body.// -->
+                    </div> <!-- card.// -->
+
+                </aside> <!-- col.// -->
+                
+            </div> <!-- row.// -->
+            <!-- ============================ COMPONENT 1 END .// ================================= -->
+
+        </div> <!-- container .//  -->
+    </section>
+
+
+    <!-----------------------------------------------------------------------PAYPAL SCRIPT STARTS HERE-------------------------------------------------------------------------------->
+    <!--GET THE BELOW SET OF CODE FROM PAYPAL WEBSITE(go to the browser and search 'paypal checkout button integration', you will see may options but choose the google link option that when opened it has 'server' on the left side of the paypal page where you will see the below code to copy from)--><!--BEFORE THIS, PUT THE 'div' WITH 'id' 'paypal-button-container' IN THE PLACE YOU WANT THE PAYPAL PAYMENT ICON TO BE(in this case it is above, in this page). AFTER THAT, PUT THE FIRST 'PAYPAL SCRIPT' IN 'base.html'. THE COPY THE NEXT CODE HERE-->
+    <!--This block of code is got from 'https://developer.paypal.com/demo/checkout/#/pattern/server' with series of editing-->
+    <script>
+        // to update the cart when changes take place, e.g when payment has been made, clear the cart
+        function updateCartDisplay() {
+            fetch("/cart/get-items/")  // API call to fetch updated cart data
+            .then(res => res.json())
+            .then(data => {
+                let cartQuantity = document.getElementById("cart-quantity");
+                cartQuantity.innerText = data.total_items || "0";  // Update cart icon/display
+            });
+        }
+
+
+        // Function to retrieve the CSRF token from cookies
+        function getCookie(name) {
+            let cookieValue = null;
+            if (document.cookie && document.cookie !== "") {
+                const cookies = document.cookie.split(";");
+                cookies.forEach(cookie => {
+                    const trimmedCookie = cookie.trim();
+                    if (trimmedCookie.startsWith(name + "=")) {
+                        cookieValue = trimmedCookie.split("=")[1];
+                    }
+                });
+            }
+            return cookieValue;
+        }
+
+        // PayPal button integration
+        paypal.Buttons({
+
+            style: {
+                    color:  'blue',
+                    shape:  'pill',
+                    label:  'pay',
+                    height: 40
+                },
+
+            createOrder: function(data, actions) {
+                return fetch("/orders/paypal/order/create/", {
+                    method: "POST",
+                    headers: {
+                        "X-CSRFToken": getCookie("csrftoken"), // Using CSRF token in request because the method above is 'POST'
+                        "Content-Type": "application/json"
+                    }
+                })
+                .then(res => res.json())
+                .then(orderData => {
+                    return orderData.paypal_order_id;
+            });
+        },
+
+
+        // Capture payment and store details
+        onApprove: function(data, actions) {
+            return fetch("/orders/paypal/order/capture/" + data.orderID + "/", {  // Make a request to the server
+                method: "POST",
+                headers: {
+                    "X-CSRFToken": getCookie("csrftoken"), // CSRF token included because the method above is 'POST'
+                    "Content-Type": "application/json"
+                }
+            })
+            .then(res => res.json())  // Convert response from the server to JSON
+            .then(orderData => {  // 'orderData' holds the result of the previous .then(res => res.json()) function, which is the JSON object returned by your server.
+                let paymentID = orderData.payment_id || "UNKNOWN";  // Use stored transaction ID
+
+                if (orderData.status === "COMPLETED") {
+                    alert("Transaction successful! Payment ID: " + orderData.payment_id);  // Correct payment ID displayed
+                    sendPaymentData(orderData); // Calls function to store payment in Payment table
+                    // Call cart update function after payment
+                    updateCartDisplay(); 
+
+                    window.location.href = "/orders/success/"; // Redirect to success page
+                } else {
+                    alert("Payment failed. Please try again.");
+                }
+            });
+            }
+        }).render("#paypal-button-container");
+
+
+        // Separate function to store payment details in Payment table
+        function sendPaymentData(orderData) {
+            fetch("/orders/payments/", {
+                method: "POST",
+                headers: {
+                    "X-CSRFToken": getCookie("csrftoken"),
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    paypal_order_id: orderData.order_id,
+                    transaction_id: orderData.payment_id,
+                    payment_method: "PayPal",
+                    order_total: orderData.order_total,
+                    amount_paid: orderData.amount_paid,
+                    status: orderData.status
+                })
+            })
+            .then(res => res.json())
+            .then(response => {
+                console.log("Payment saved successfully:", response);
+                loadPaymentHistory();  // Refresh payment history dynamically
+            })
+            .catch(error => {
+                console.error("Error saving payment:", error);
+            });
+        }
+
+
+        // Fetch and display payment history
+        function loadPaymentHistory() {
+            fetch("/orders/get-payments/")
+            .then(res => res.json())
+            .then(data => {
+                console.log("Payments:", data);
+                let paymentsList = document.getElementById("payments-list");
+                paymentsList.innerHTML = "";  // Clear existing rows
+                data.forEach(payment => {
+                    let row = `<tr>
+                        <td>${payment.paypal_order_id}</td>
+                        <td>${payment.transaction_id}</td>
+                        <td>${payment.order_total}</td>
+                        <td>${payment.amount_paid}</td>
+                        <td>${payment.status}</td>
+                        <td>${new Date(payment.created_at).toLocaleDateString()}</td>
+                    </tr>`;
+                    paymentsList.innerHTML += row;
+                });
+            });
+        }
+
+
+        // Load payment history on page load
+        document.addEventListener("DOMContentLoaded", function() {
+            loadPaymentHistory();
+        });
+
+    </script>
+
+{% endblock %}

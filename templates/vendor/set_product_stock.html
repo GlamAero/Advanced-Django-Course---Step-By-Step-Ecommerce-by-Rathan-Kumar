@@ -1,0 +1,51 @@
+{% extends 'base.html' %}
+
+{% load static %}
+
+{% block content %}
+
+    <div class="container py-5">
+        <div class="card mx-auto" style="max-width: 500px;">
+            <div class="card-header">
+                <h5>Update Stock: {{ product.name }}</h5>
+            </div>
+            <div class="card-body">
+                <form method="post">
+                    {% csrf_token %}
+                    <div class="mb-3">
+                        <label for="stock" class="form-label">Stock Quantity</label>
+                        <input type="number" id="stock" name="stock_quantity" class="form-control"
+                            value="{{ product.stock_quantity }}" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Save</button>
+                    <a href="{% url 'vendor_dashboard' %}" class="btn btn-secondary">Cancel</a>
+                </form>
+            </div>
+        </div>
+    </div>
+
+<!------------------------------------------------------------------------------------------------------>
+    {% if messages %}
+        <div class="alert alert-info">
+            {% for message in messages %}
+                <p>{{ message }}</p>
+            {% endfor %}
+        </div>
+    {% endif %}
+
+{% endblock %}
+
+{% block extra_js %} 
+    <script>
+        // Add any additional JavaScript if needed
+        $(document).ready(function() {
+            // Example: Show a success message after form submission
+            if ({{ messages|length }} > 0) {
+                alert("Stock updated successfully!");
+            }
+        });
+    </script>
+{% endblock %}
+
+
+

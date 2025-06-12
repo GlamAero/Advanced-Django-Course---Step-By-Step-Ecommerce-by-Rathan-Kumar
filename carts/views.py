@@ -1,8 +1,9 @@
 from django.shortcuts import render, redirect, get_object_or_404
-from store.models import Product, Variation
+from vendor.models import Product, Variation, VariationCombination
 from .models import Cart, CartItem
 from django.http import HttpResponse
 from django.contrib.auth.decorators import login_required
+
 
 
 # Create your views here.
@@ -17,7 +18,6 @@ def _cart_id(request):
     return cart
 
 
-
 # The 'add_cart' function is used to add a product to the cart:
 # - It first checks if the cart already exists in the database. If not, it creates a new cart.
 # - Then, it checks if the product is already in the cart. If it is, it increases the quantity by 1. If not, it creates a new cart item with a quantity of 1.
@@ -26,253 +26,159 @@ def _cart_id(request):
 def add_cart(request, product_id):
 
     #--------------------------USER-----------------------------#
-    # 'request.user' is the user making a request in the frontend
+    # 'request.user' is the user making a request in the frontend, whether logged in or not.
+    # If the 'user', that is 'request.user' is not logged_in(is_authenticated), such is an 'Anonymous user'. And rather than returning 'None', it returns 'Anonymous user' because in django 'request.user' is never 'None' even when no user is logged in. Instead, Django assigns an instance of 'AnonymousUser'. This design choice ensures consistency and avoids unnecessary 'None' checks in code.
     current_user = request.user
 
     #--------------------------PRODUCT--------------------------#
     product = get_object_or_404(Product, id=product_id)
 
+    # ----------------- FOR PRODUCT VARIATION:----------------#
+    # to get a list of product variations, meaning a list of products and their corresponding variations:
+    # Extract Variations in One Step
+    product_variation = []
+
+    # 'key' is got from the 'product_details.html' file, in the 'select' area.
+    # 'item' is the name given to the 'select' element in our 'stores/product_detail.html' page.
+    # 'request.POST' is the dictionary containing the options we selected in 'product_detail.html' page.
+    # Thus 'item' is like 'color' or 'size' while 'request.POST[item] is like 'blue' for color or 'medium' for size
+    if request.method == 'POST':
+        # If the 'color' is 'blue', 'color' is the 'item' and will be saved as 'key'
+        # Similarly if the 'size' is 'medium', 'size' is the 'item' and will be saved as 'key'
+        # The value the user gave for 'color' would be used. Thus, for 'blue' being 'request.POST[key]', it will be saved as 'value'
+        # Similarly, in the case of 'size'; for 'medium' being 'request.POST[key]' will be saved as 'value'
+        for key, value in request.POST.items():
+            # get the 'variation' where the key and value chosen by the user corresponds with the values in the 'models.py file
+            # 'iexact' means to ignore whether the inputed value is capital or small letter.
+            try:
+                variation = Variation.objects.get(product=product, variation_category__iexact=key, variation_value__iexact=value)
+                # here we append the variations to the 'product_variation' we created above:
+                product_variation.append(variation)
+            except Variation.DoesNotExist:
+                pass  # Avoid errors if an invalid selection is made
+
+    # Check if a VariationCombination exists for the chosen variations
+    variation_combination = VariationCombination.objects.filter(product=product, variations__in=product_variation).first()
+
+    if not variation_combination:
+        variation_combination = VariationCombination.objects.create(product=product)
+        variation_combination.variations.set(product_variation)  # Assign selected variations
+        variation_combination.save()  # Ensure data is saved in the database
+
+
+    # If User is Logged In (Use User-Based Cart):
     # if the current user is logged in:
     # remember that logged in user already have a cart assigned them in function 'login' in 'accounts/views.py'
     if current_user.is_authenticated:
-
-        #----------------- FOR PRODUCT VARIATION:----------------#
-
-        # to get a list of product variations, meaning a list of products and their corresponding variations:
-        product_variation = []
-
-        if request.method == 'POST':
-
-            # 'key' is got from the 'product_details.html' file, in the 'select' area. 
-            # 'item' is the name given to the 'select' element in our 'stores/product_detail.html' page.
-            # 'request.POST' is the dictionary containing the options we selected in 'product_detail.html' page.
-            # Thus 'item' is like 'color' or 'size' while 'request.POST[item] is like 'blue' for color or 'medium' for size
-            for item in request.POST:
-                # If the 'color' is 'blue', 'color' is the 'item' and will be saved as 'key'
-                # Similarly if the 'size' is 'medium', 'size' is the 'item' and will be saved as 'key'  
-                key = item
-
-                # The value the user gave for 'color' would be used. Thus, for 'blue' being 'request.POST[key]', it will be saved as 'value'
-                # Similarly, in the case of 'size'; for 'medium' being 'request.POST[key]' will be saved as 'value'
-                value = request.POST[key]
-                
-                # get the 'variation' where the key and value chosen by the user corresponds with the values in the 'models.py file
-                # 'iexact' means to ignore whether the inputed value is capital or small letter.
-                try:
-                    variation = Variation.objects.get(product=product, variation_category__iexact=key, variation_value__iexact=value)
-                    
-                    # here we append the variations to the 'product_variation' we created above:
-                    product_variation.append(variation)
-                except:
-                    pass
-
-        #------------------------CART_ITEM--------------------------#
+        # ------------------------CART_ITEM--------------------------#
 
         # get all the items of the product in the cart, after being added to cart. This is taken from the database(models.py file)
+        # Here we did not use the 'cart=cart'(where'cart_id=cart_id' to filter the CartItem we need because the user is logged in, thus we use the 'user=current_user(who has 'user_id') to filter. Unlike the 'cart_id' of Cart session, it is more stable and unique per user and does not generate a token each time a user adds to cart whn not logged in.
         is_cart_item_exists = CartItem.objects.filter(product=product, user=current_user).exists()
 
         # check if cart_item(product, e.g Air Jordan) exists:
         if is_cart_item_exists:
 
-            # Note that we used 'user=request.user' instead of 'cart=cart' in the definition of the 'cart_item' here. This is so because we are logged in and so we have a logged in user we can use. 
-            # Also the logged in user is already assigned a 'cart' object in the function 'login' of 'accounts/views.py', hence not accessed here. 
-            cart_item = CartItem.objects.filter(product=product, user=current_user)
+            # Note that we used 'user=request.user' instead of 'cart=cart' in the definition of the 'cart_item' here. This is so because we are logged in and so we have a logged in user we can use.
+            # Also the logged in user is already assigned a 'cart' object in the function 'login' of 'accounts/views.py', hence not accessed here.
+            cart_items = CartItem.objects.filter(product=product, user=current_user)
 
-            ex_var_list = [] # Stores variations of each cart item
-            id = [] # Stores IDs of cart items
+            # the below means the existing variation(s) associated with the cart_item(particular product(that is: product with id=product_id of product the user selected) in the said cart) that has been added to cart when we previously added to cart.
+            # 'item.variations.all()' retrieves all variations (size, color, etc.) linked to a specific cart_item(item). It returns the variations of that cart item (Color = Black, Size = Medium).
+            # This('item.variations.all') does not return all the variations of all products in the cart. Rather, it returns all variations(e.g color: red, size: medium etc) of one item(e.g Air Jordan) the user selected when they 'added to cart' at a time.
 
-            # from the above, 'cart_item' is the instance of the product model added to a cart.
-            # 'cart_item' is a collection (queryset) of CartItem objects (e.g Air Jordan of color: Black and size: Medium, Air Jordan of color: White and size: Medium, Air Jordan of color: Yellow and size: Large). That is, the all the items in the cart with the same product_id with the product_id of the product the user selected.
-            # Here, 'item' represents each individual CartItem during iteration (e.g. Air Jordan of color: Black and size: Medium)
-            for item in cart_item:
+            # 'cart_items' is a queryset that contains all cart items for the given product and user.
+            # 'existing_variation' is a list of variations associated with the current cart item.
+            for item in cart_items:
+                existing_variation = list(item.variations.all())
 
-                # the below means the existing variation(s) associated with the cart_item(particular product(that is: product with id=product_id of product the user selected) in the said cart) that has been added to cart when we previously added to cart.
-                # 'item.variations.all()' retrieves all variations (size, color, etc.) linked to a specific cart_item(item). It returns the variations of that cart item (Color = Black, Size = Medium). 
-                # This('item.variations.all') does not return all the variations of all products in the cart. Rather, it returns all variations(e.g color: red, size: medium etc) of one item(e.g Air Jordan) the user selected when they 'added to cart' at a time.
-                existing_variation = item.variations.all()
-                ex_var_list.append(list(existing_variation))
+                # Compare Variations as Sets for Accuracy
+                # 'set(product_variation)' converts the list of variations selected by the user to a set for accurate comparison.
+                # 'set(existing_variation)' converts the list of existing variations in the cart item to a set for accurate comparison.
+                # This ensures that the order of variations does not affect the comparison.
+                # 'set' is used to compare the variations selected by the user with the existing variations in the cart item.
+                if set(product_variation) == set(existing_variation):
+                    item.quantity += 1  # Increase quantity
+                    item.save()
+                    break
 
-                id.append(item.id)
-
-
-            # if the variation of the product(e.g Air Jordan of color:blue and size:red) chosen by the user is already in the existing product variation in the cart/database:
-            if product_variation in ex_var_list:
-
-                # increase the cart_item quantity:
-
-                # first, get the index value of the 'product_variation' in the 'ex_var_list'
-                index = ex_var_list.index(product_variation)
-
-                # then, get the id of the index value of the 'product_variation' in the 'ex_var_list'
-                item_id = id[index]
-
-                item = CartItem.objects.get(product=product, id=item_id)
-                item.quantity += 1
-                item.save()
-
-            # if the cart_item(product, e.g Air Jordan) is present in the cart but the variation(e.g Air Jordan of color:blue and size:red) of the product chosen by the user is not in the existing product variation in the cart/database:
+            # If no existing variation matches, create a new cart item
             else:
-                # create a new cart item:
-                item = CartItem.objects.create(product=product, quantity=1, user=current_user)
+                cart_item = CartItem.objects.create(product=product, quantity=1, user=current_user)
+                cart_item.variations.set(product_variation)
+                cart_item.save()
 
-                
-                # adding the variation above to the cart_item:
-                if len(product_variation) > 0: # this is the same as: 'if product_variation.exists:'
-
-                    # before adding an item to cart alongside its variations, remove the connection between the (old)'item' in the previous 'add to cart' and its associated variations in the ManyToManyField. But do not delete the actual variation objects from the database. This way a new set of variation can be added to the same item:
-                    item.variations.clear()
-
-                    # add a new set of variations to the item selected:
-                    item.variations.add(*product_variation)
-                item.save()
-
-        # if the cart_item(product, e.g Air Jordon) does not exist in the cart/database
+        # if the cart_item(product, e.g Air Jordan) does not exist in the cart/database, create a new one
         else:
             # if the product does not exist at all in the CartItem section of the database:
-            cart_item = CartItem.objects.create(
-                product=product,
-                quantity=1,
-                user=current_user,
-            )
-
-            # adding the variation above to the cart_item:
-            if len(product_variation) > 0:  # this is the same as: 'if product_variation.exists:'
-
-                # before adding an item to cart alongside its variations, remove the connection between the 'item' existing in the cart and its associated variations in the ManyToManyField. But do not delete the actual variation objects from the database. This way a new set of variation can be added to the item:
-                cart_item.variations.clear()
-
-                cart_item.variations.add(*product_variation)
-
+            cart_item = CartItem.objects.create(product=product, quantity=1, user=current_user)
+            cart_item.variations.set(product_variation)
             cart_item.save()
 
-        return redirect('cart')
-    
-
-    # if the current user is not logged in:
-    else:
-        
-        #----------------- FOR PRODUCT VARIATION:----------------#
-
-        # to get a list of product variations, meaning a list of products and their corresponding variations:
-        product_variation = []
-
-        if request.method == 'POST':
-
-            # 'key' is got from the 'product_details.html' file, in the 'select' area. 
-            # 'item' is the name given to the 'select' element in our 'stores/product_detail.html' page.
-            # 'request.POST' is the dictionary containing the options we selected in 'product_detail.html' page.
-            # Thus 'item' is like 'color' or 'size' while 'request.POST[item] is like 'blue' for color or 'medium' for size
-            for item in request.POST:
-                # If the 'color' is 'blue', 'color' is the 'item' and will be saved as 'key'
-                # Similarly if the 'size' is 'medium', 'size' is the 'item' and will be saved as 'key'  
-                key = item
-
-                # The value the user gave for 'color' would be used. Thus, for 'blue' being 'request.POST[key]', it will be saved as 'value'
-                # Similarly, in the case of 'size'; for 'medium' being 'request.POST[key]' will be saved as 'value'
-                value = request.POST[key]
-                
-                # get the 'variation' where the key and value chosen by the user corresponds with the values in the 'models.py file
-                # 'iexact' means to ignore whether the inputed value is capital or small letter.
-                try:
-                    variation = Variation.objects.get(product=product, variation_category__iexact=key, variation_value__iexact=value)
-                    
-                    # here we append the variations to the 'product_variation' we created above:
-                    product_variation.append(variation)
-                except:
-                    pass
-
-        
-        # --------------------------- CART-------------------------#
-        try:
-            cart = Cart.objects.get(cart_id=_cart_id(request))
-        except Cart.DoesNotExist:
+    else:  
+        # If User is NOT Logged In (Use Session-Based Cart)
+        # Here we are not logged in, so we will use the session-based cart.
+        # Get or Create Cart
+        # 'request.session.get('cart_id')' retrieves the cart ID from the session. If it does not exist, it returns None.
+        # 'cart_id' is the unique identifier for the cart session.
+        # 'request.session' is a dictionary-like object that stores data for the user's session.
+        # 'request.session.get('cart_id')' checks if the cart ID already exists in the session.
+        # If it does not exist, it creates a new cart and saves the cart ID in the session.
+        # '_cart_id(request)' is a function defined above to generate a unique cart ID for the session.
+        cart_id = request.session.get('cart_id')
+        if not cart_id:
             cart = Cart.objects.create(cart_id=_cart_id(request))
-        cart.save()
-
-
-        #------------------------CART_ITEM--------------------------#
-
-        # get all the items of the product in the cart, after being added to cart. This is taken from the database(models.py file)
-        is_cart_item_exists = CartItem.objects.filter(product=product, cart=cart).exists()
-
-        # check if cart_item(product, e.g Air Jordan) exists:
-        # Note that we used 'cart=cart' in the definition of the 'cart_item' here. This is so because we are not logged in, thus not assigned a 'cart' object. When logged in, a 'cart' object is created for the logged in user, as coded for in the function 'login' of 'accounts/views.py'
-        if is_cart_item_exists:
-            cart_item = CartItem.objects.filter(product=product, cart=cart) 
-
-            # Existing variations -> Database
-            # Current variations = product_variation
-            # Item ID
-
-            ex_var_list = [] # Stores variations of each cart item
-            id = [] # Stores IDs of cart items
-
-            # from the above, 'cart_item' is the instance of the product model added to a cart.
-            # 'cart_item' is a collection (queryset) of CartItem objects (e.g Air Jordan of color: Black and size: Medium, Air Jordan of color: White and size: Medium, Air Jordan of color: Yellow and size: Large). That is, the all the items in the cart with the same product_id with the product_id of the product the user selected.
-            # Here, 'item' represents each individual CartItem during iteration (e.g. Air Jordan of color: Black and size: Medium)
-            for item in cart_item:
-
-                # the below means the existing variation(s) associated with the cart_item(particular product(that is: product with id=product_id of product the user selected) in the said cart) that has been added to cart when we previously added to cart.
-                # 'item.variations.all()' retrieves all variations (size, color, etc.) linked to a specific cart_item(item). It returns the variations of that cart item (Color = Black, Size = Medium). 
-                # This('item.variations.all') does not return all the variations of all products in the cart. Rather, it returns all variations of one set of item the user selected when they 'added to cart' at one time.
-                existing_variation = item.variations.all()
-                ex_var_list.append(list(existing_variation))
-
-                id.append(item.id)
-
-
-            # if the variation of the product(e.g Air Jordan of color:blue and size:red) chosen by the user is already in the existing product variation in the cart/database:
-            if product_variation in ex_var_list:
-
-                # increase the cart_item quantity:
-
-                # first, get the index value of the 'product_variation' in the 'ex_var_list'
-                index = ex_var_list.index(product_variation)
-
-                # then, get the id of the index value of the 'product_variation' in the 'ex_var_list'
-                item_id = id[index]
-
-                item = CartItem.objects.get(product=product, id=item_id)
-                item.quantity += 1
-                item.save()
-
-            # if the cart_item(product, e.g Air Jordan) is present in the cart but the variation(e.g Air Jordan of color:blue and size:red) of the product chosen by the user is not in the existing product variation in the cart/database:
-            else:
-                # create a new cart item:
-                item = CartItem.objects.create(product=product, quantity=1, cart=cart)
-
-                
-                # adding the variation above to the cart_item:
-                if len(product_variation) > 0: # this is the same as: 'if product_variation.exists:'
-
-                    # before adding an item to cart alongside its variations, remove the connection between the (old)'item' in the previous 'add to cart' and its associated variations in the ManyToManyField. But do not delete the actual variation objects from the database. This way a new set of variation can be added to the same item:
-                    item.variations.clear()
-
-                    # add a new set of variations to the item selected:
-                    item.variations.add(*product_variation)
-                item.save()
-
-        # if the cart_item(product, e.g Air Jordon) does not exist in the cart/database
+            cart.save()
+            request.session['cart_id'] = cart.cart_id
         else:
-            # if the product does not exist at all in the CartItem section of the database:
-            cart_item = CartItem.objects.create(
-                product=product,
-                quantity=1,
-                cart=cart,
-            )
+            cart = Cart.objects.get(cart_id=cart_id)
 
-            # adding the variation above to the cart_item:
-            if len(product_variation) > 0:  # this is the same as: 'if product_variation.exists:'
+        is_cart_item_exists = CartItem.objects.filter(product=product, cart=cart).exists()
+        
+        if is_cart_item_exists:
+            cart_items = CartItem.objects.filter(product=product, cart=cart)
 
-                # before adding an item to cart alongside its variations, remove the connection between the 'item' existing in the cart and its associated variations in the ManyToManyField. But do not delete the actual variation objects from the database. This way a new set of variation can be added to the item:
-                cart_item.variations.clear()
+            # The 'cart_items' variable retrieves all the cart items associated with the cart
+            # - The 'is_active=True' condition ensures that only active items are retrieved. That is, items that are still in the cart and not marked as inactive.
+            for item in cart_items:
 
-                cart_item.variations.add(*product_variation)
+                # 'item.variations.all()' retrieves all variations (size, color, etc.) linked to a specific cart_item(item). It returns the variations of that cart item (Color = Black, Size = Medium).
+                # This('item.variations.all') does not return all the variations of all products in the cart. Rather, it returns all variations(e.g color: red, size: medium etc) of one item(e.g Air Jordan) the user selected when they 'added to cart' at a time.
+                existing_variation = list(item.variations.all())
 
+                # Compare Variations as Sets for Accuracy
+                # 'set(product_variation)' converts the list of variations selected by the user to a set for accurate comparison.
+                # 'set(existing_variation)' converts the list of existing variations in the cart item to a set for accurate comparison.
+                if set(product_variation) == set(existing_variation):
+                    # If the variations match, increase the quantity and save the item
+                    # 'item.quantity' retrieves the quantity of the cart item.
+                    item.quantity += 1
+                    item.save()
+                    
+                    # If the variations match, increase the quantity and save the item
+                    break
+
+            # If no existing variation matches, create a new cart item
+            else:
+
+                # If no existing variation matches, create a new cart item
+                cart_item = CartItem.objects.create(product=product, quantity=1, cart=cart)
+                # 'cart_item.variations.set(product_variation)' sets the variations for the cart item.
+                cart_item.variations.set(product_variation)
+                cart_item.save()
+
+        # if the cart_item(product, e.g Air Jordan) does not exist in the cart/database, create a new one
+        else:
+            cart_item = CartItem.objects.create(product=product, quantity=1, cart=cart)
+
+            # 'cart_item.variations.set(product_variation)' sets the variations for the cart item.
+            # 'product_variation' is a list of variations selected by the user.
+            # 'cart_item.variations.set(product_variation)' sets the variations for the cart item.
+            # This ensures that the cart item has the correct variations associated with it.
+            cart_item.variations.set(product_variation)
             cart_item.save()
 
-        return redirect('cart')
-
+    return redirect('cart')
 
 
 # The 'remove_cart' function is used to remove a product quantity or a product(if the quantity is originally (less or) equal to 1) from the cart:

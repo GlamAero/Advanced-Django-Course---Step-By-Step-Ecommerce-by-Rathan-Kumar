@@ -1,5 +1,5 @@
 from django.db import models
-from django.contrib.auth.models import AbstractBaseUser, BaseUserManager
+from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 
 # to create custom user model:
 
@@ -50,16 +50,20 @@ class MyAccountManager(BaseUserManager):
 
 
 # Create your models here:
-class Account(AbstractBaseUser):
+from django.db import models
+from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin, Group, Permission
+
+
+# (Your existing MyAccountManager stays the same)
+
+
+class Account(AbstractBaseUser, PermissionsMixin):
     first_name = models.CharField(max_length=30)
     last_name = models.CharField(max_length=30)
     username = models.CharField(max_length=30, unique=True)
     email = models.EmailField(max_length=254, unique=True)
-
-    # since 'phone_number' can be blank as set below, in the 'create_user' function above, 'phone number' is not there since it is optional and not a core field
     phone_number = models.CharField(max_length=15, blank=True)
-    
-    # Required fields
+
     date_joined = models.DateTimeField(auto_now_add=True)
     last_login = models.DateTimeField(auto_now_add=True)
     is_admin = models.BooleanField(default=False)
@@ -67,24 +71,32 @@ class Account(AbstractBaseUser):
     is_active = models.BooleanField(default=False)
     is_superadmin = models.BooleanField(default=False)
 
+    # Add these two fields to avoid clash with Vendor model
+    groups = models.ManyToManyField(
+        Group,
+        related_name='account_user_set',
+        blank=True,
+        help_text='The groups this user belongs to.',
+        verbose_name='groups'
+    )
+    user_permissions = models.ManyToManyField(
+        Permission,
+        related_name='account_user_permissions',
+        blank=True,
+        help_text='Specific permissions for this user.',
+        verbose_name='user permissions'
+    )
 
-    # 'USERNAME FIELD' here means to specify the content expected in the default 'USERNAME' field when 'logging in' to the admin. This overides the default 'USERNAME' field expected to be filled in, with 'EMAIL'.
     USERNAME_FIELD = 'email'
-
-    # This is the required filled expected to be filled by the user when 'signing up' for access to the custom django user admin page:
     REQUIRED_FIELDS = ['username', 'first_name', 'last_name']
 
-    # telling this model 'Account', that it is being used in another model above called 'MyAccountManager':
     objects = MyAccountManager()
 
     def __str__(self):
         return self.email
 
-
-    # This gives full permission to the admin to make modifications necessary in the page as he deems fit
     def has_perm(self, perm, obj=None):
         return self.is_admin
-    
+
     def has_module_perms(self, add_label):
         return True
-

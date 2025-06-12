@@ -189,7 +189,8 @@ def login(request):
             auth.login(request, user)
             messages.success(request, "You are now logged in")
 
-            # IF WE ARE VISITING ANY PAGE WHICH REQUIRES TO LOGIN FIRST TO VIEW THE PAGE:
+            # Dynamically Redirect the User to the Next Page they wanted to visit before they logged in (which prompted them to log in) after they logged in
+            # IF WE ARE VISITING ANY PAGE WHICH REQUIRES TO LOGIN FIRST TO VIEW THE PAGE BUT THE CURRENT USER IS NOT LOGGED IN, THEN WE WOULD BE REDIRECTED TO LOGI IN FIRST. BUT BEFORE WE HAVE TO MAKE A DJANGO CODE TO KEEP THE 'url' THE CURRENT USER WANTS TO ACCESS SO THAT IT COMES AS 'next' AND ONCE LOGGED IN, THE USER IS AUTOMATICALLY DIRECTED THERE:
             # the below will hold the url of any previous page was referring to(or was trying to get access to) which requires login(for example, if a user who is not logged in is trying to access the checkout page after adding to cart, he or she would be redirected to 'login' page and thereafter 'dashboard' page which 'login' page leads to. 
             # However, with this, this url now holds the original url(e.g checkout) which the user intended to go to
             url = request.META.get('HTTP_REFERER')
@@ -201,7 +202,7 @@ def login(request):
                 # the below converts the query above to a dictionary:
                 params = dict(x.split('=') for x in query.split('&')) # {'next': '/cart/checkout/'}
 
-                if 'next' in params:
+                if 'next' in params: # 'next' here is the key(e.g 'next' in ?next=cart/checkout)
                     nextPage = params['next']
                     return redirect(nextPage)
 
