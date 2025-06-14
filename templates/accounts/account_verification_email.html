@@ -1,0 +1,8 @@
+<!--This page is referenced in the function- 'register' in view.py file of the 'Account' app. It is the email for the activation of the registered account-->
+<!--'autoescape' helps to prevent cross site scripting: a situation where hackers send in malicious content(e.g a url link) into a website. And upon clicking that link, the hacker has access to the user details and other information -->
+{% autoescape off %}
+    Hi {{ user.first_name }},
+    Please click on the below link to confirm your registration.
+    http://{{ domain }}{% url 'activate' uidb64=uid token=token %}
+    If you think it is not you please ignore this email.
+{% endautoescape %}

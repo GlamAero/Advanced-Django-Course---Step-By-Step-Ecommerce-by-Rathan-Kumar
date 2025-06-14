@@ -1,0 +1,51 @@
+FOR SUPERUSER: 
+remember that we log in using email for the admin
+Email: aerotrade001@gmail.com
+Username: Aerosmart1
+Password: Ayobami1
+
+for the second one we created:
+Email: tejuojoayodeji@yahoo.com
+Username: tejuojoayodeji
+Password: Aerosmart777#
+
+THIS PROJECT TERMINAL IS THE GIT BASH
+
+NOTE: 1. CART: the cart related to the session created to hold all cart_items.
+      2. CART_ITEM: the product item(e.g '3' quantities of Air Jordan canvass ) with all its variations(size: 4 and color: blue) added to the cart by the user.
+      3. ITEM: each variation(e.g size) of the CART_ITEM.
+	    
+
+
+GOOGLE APP PASSWORD(for this web app): xocthptmzwilivzm
+
+
+THE PROJECT NAME IS 'pogosmarketplace'
+
+The project command line is 'git bash'
+
+The virtual environment name is 'env'
+
+for 'gitignore' file, search for 'gitignore.io' on google and input Django on the site's search bar. Copy all that is in the file and paste into our project's '.gitignore' file.
+
+		CHANGING DEFAULT DJANGO USER MODEL TO CUSTOM USER MODEL:
+
+The default Django admin was changed and we built a custom user model where access is by EMAIL instead of the default USERNAME.
+
+In creating this custom user model, we created an app called 'accounts. It is in its(account app) model file that we built this custom user model. The model name is 'Account' and it is run on 'MyAccountManager' to show how it will function to create user accounts info and to give permissions to users, e.g normal users and superusers.
+
+Then we had to tell the 'settings.py' file of our main project - 'pogosmarketplace' that we have overriden the default Django user model to a custom user model by typing in 'AUTH_USER_MODEL = 'accounts.Account''
+
+Thereafter, we delete the file: 'db.sqlite3' in our project. We also delete any 'migration'  file(e.g 0001_initial.py) with info saved in the default Django user model in any of our apps. This way we clear up any file saved in the default Django admin model. This means we are now ready to start using the custom user model as the new default user model where our data would be forthwith saved. 
+Then, we makemigrations and migrate our data to the database. Then we create a new superuser and login with the credentials signed up with.
+
+IN THE 'admin.py' file of the 'accounts' app, to make the custom user model 'Account' the default user model in the admin panel, we need to create a custom admin class that inherits from 'UserAdmin' and specify the fields we want to display in the admin panel.
+We also need to register this custom admin class with the admin site. In addition, this makes the password a read-only field in the admin panel, so that it cannot be changed directly from the admin interface. Instead, you would need to use the Django shell or a custom form to change the password for a user.
+
+
+
+	
+
+
+
+

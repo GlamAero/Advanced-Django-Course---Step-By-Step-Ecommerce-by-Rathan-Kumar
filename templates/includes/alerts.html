@@ -1,0 +1,29 @@
+<!--The below is got from searching 'django messages' online and checking the docs-->
+<!--This is able to work because in the 'pogosmarketplace/settings.py' file we copied a settings -'MESSAGE_TAGS' from the docs of 'django messages' and edited it as appropriate-->
+
+{% if messages %}
+
+    {% for message in messages %}
+
+    <div id="message" class="container">
+        
+        <div {% if message.tags %} class="alert alert-{{ message.tags }}"{% endif %} role="alert">
+
+            <!--for the cancel('x') button that appears on notfications:-->
+            <button type ="button" class="close" data-dismiss="alert" aria-label="Close">
+                <span aria-hidden="true">
+                    &times;
+                </span>
+            </button>
+
+            {% if message.level == DEFAULT_MESSAGE_LEVELS.ERROR %}Error: {% endif %}
+
+            {{ message }}
+
+        </div>
+
+    </div>
+
+    {% endfor %}
+
+{% endif %}
