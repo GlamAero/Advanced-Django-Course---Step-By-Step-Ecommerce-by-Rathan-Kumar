@@ -10,7 +10,10 @@ class Payment(models.Model):
     # Link the payment to the seller
     user = models.ForeignKey(Account, on_delete=models.CASCADE, related_name="payments")
     
+    # for paypal in orders/views.py. This gets filled automatically when the 'Pay with PayPal' button is clicked because it is equal to the 'order_id' as defined in 'orders/views.py'.
     paypal_order_id = models.CharField(max_length=50, unique=True, null=True, blank=True)
+
+    # Adds transaction_id to store PayPal’s payment capture ID (captures[0].id). And it ensures compatibility with your capture_paypal_order function in orders/views.py. This gets filled after the payment has been completed
     transaction_id = models.CharField(max_length=100, unique=True, null=True, blank=True)
     payment_method = models.CharField(max_length=50, default="PayPal")
     order_total = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)

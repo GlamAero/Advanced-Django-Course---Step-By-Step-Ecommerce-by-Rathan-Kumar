@@ -1,4 +1,4 @@
-<!--This is copied form 'stores/cart.html' and pasted here and edited-->
+<!--This is copied form 'stores/cart.html' and edited-->
 
 {% extends 'base.html' %}
 
@@ -17,7 +17,7 @@
                         <div class="card-body">
                             <h4 class="card-title mb-4">Billing Address</h4>
 
-                            <form action="" method="POST">
+                            <form action="{% url 'place_order' %}" method="POST">
 
                                 {% csrf_token %}
 
@@ -30,6 +30,18 @@
                                     <div class="col form-group">
                                         <label for="">Last Name</label>
                                         <input type="text" name="last_name" class="form-control" required>
+                                    </div>
+                                </div>
+
+                                <div class="form-row">
+                                    <div class="col form-group">
+                                        <label for="">Email</label>
+                                        <input type="email" name="email" class="form-control" required>
+                                    </div>
+
+                                    <div class="col form-group">
+                                        <label for="">Phone Number</label>
+                                        <input type="text" name="phone" class="form-control" required>
                                     </div>
                                 </div>
 

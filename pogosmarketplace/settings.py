@@ -25,10 +25,39 @@ load_dotenv()
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-&w#0qbzb#%$9@iw*)1clrqd-yqguo7_bj@su1&26^z&d)0x89m'
+SECRET_KEY = os.environ.get('SECRET_KEY')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.environ.get("DEBUG", "True") == "True"  # Controls debug mode dynamically
+ENVIRONMENT = os.environ.get("ENVIRONMENT", "development")  # Set this to 'production' in live environments
+
+if ENVIRONMENT == "production":
+    CSRF_COOKIE_SECURE = True  # Enforce CSRF security in production
+    SESSION_COOKIE_SECURE = True  # Prevent session hijacking
+    SECURE_BROWSER_XSS_FILTER = True  # Enable browser XSS protection
+    SECURE_CONTENT_TYPE_NOSNIFF = True  # Prevent MIME-type attacks
+    SECURE_SSL_REDIRECT = True  # Force HTTPS connections
+    SECURE_HSTS_SECONDS = 31536000  # Enforce HTTPS for 1 year
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True  # Apply HTTPS to subdomains
+    SECURE_HSTS_PRELOAD = True  # Preload HSTS for all browsers
+    X_FRAME_OPTIONS = "DENY"  # Prevent clickjacking
+else:
+    CSRF_COOKIE_SECURE = False  # Allow HTTP in development
+    SESSION_COOKIE_SECURE = False
+    SECURE_SSL_REDIRECT = False  # Avoid forcing HTTPS on localhost
+    SECURE_HSTS_SECONDS = 0
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = False
+    SECURE_HSTS_PRELOAD = False
+    X_FRAME_OPTIONS = "SAMEORIGIN"  # Allow local iframe usage
+
+# SECURITY WARNING: don't run with debug turned on in production!
+# DEBUG = True
+
+# This prevents unauthorized external access in production.
+if ENVIRONMENT == "production":
+    ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "").split(",")  # Define via environment variable
+else:
+    ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
 
 ALLOWED_HOSTS = []
 
@@ -88,16 +117,30 @@ WSGI_APPLICATION = 'pogosmarketplace.wsgi.application'
 # We are telling this 'settings.py' file that we are using a custom user model(instead of the default django admin user model) which we created in 'account' app model:
 AUTH_USER_MODEL = 'accounts.Account'
 
-
-# Database
-# https://docs.djangoproject.com/en/5.2/ref/settings/#databases
-
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+if ENVIRONMENT == "production":
+    DATABASES = {  # Use a remote database for production
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": os.environ.get("DB_NAME"),
+            "USER": os.environ.get("DB_USER"),
+            "PASSWORD": os.environ.get("DB_PASSWORD"),
+            "HOST": os.environ.get("DB_HOST"),
+            "PORT": "5432",
+        }
     }
-}
+
+else:
+    # Database
+    # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
+    # Use a local SQLite database for development
+    # This is the database configuration for development. It uses SQLite, which is a lightweight database that is easy to set up and use for development purposes.
+    # It is not recommended for production use, but it is suitable for development and testing.
+    DATABASES = {  # Use local database for development
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": BASE_DIR / "db.sqlite3",
+        }
+    }
 
 
 # Password validation
@@ -131,34 +174,83 @@ USE_I18N = True
 USE_TZ = True
 
 
-# Static files (CSS, JavaScript, Images)
-# https://docs.djangoproject.com/en/5.2/howto/static-files/
+# In 'production' settings I used a cloud-based or CDN storage instead of local directories:
+# Doing this allows for faster content delivery and better scalability.
+# In 'development' settings I used local directories for static and media files:
+# This enhances performance and security for media storage:
+if ENVIRONMENT == "production":
+    STATIC_URL = "https://cdn.example.com/static/"  # Use CDN in production
+    MEDIA_URL = "https://cdn.example.com/media/"  # Secure media hosting
+    STATIC_ROOT = BASE_DIR / "staticfiles"
+    MEDIA_ROOT = BASE_DIR / "mediafiles"
+else:
+    # The below URL is where the static files will be served from in development. It is the URL prefix for static files, for example, if you have static files in a directory called 'pogosmarketplace/static' in your project, they will be collected from 'pogosmarketplace/static/css/style.css' into the 'STATIC_ROOT = BASE_DIR / 'static'' and accessible at 'http://localhost:8000/static/css/style.css' after running the development server.
+    STATIC_URL = '/static/'
+
+    # Default primary key field type
+    # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
+
+    # The below is where all the static files from 'STATICFILES_DIRS' will be collected to when you run the 'python manage.py collectstatic' command. This folder gets created automatically when you run the command 'python manage.py collectstatic'. It is the location where all static files are collected for production use.
+    STATIC_ROOT = BASE_DIR /'static'
+
+    # The below is where Django will look for static files in your project. You can add multiple directories here, and Django will look in each of them for static files. The paths should be relative to the base directory of your project.
+    # For example, if you have a directory called 'pogosmarketplace/static' in your project, you would add it here. This is where Django will look for static files when you run the command ''python manage.py collectstatic' in development server.
+    STATICFILES_DIRS = [
+        'pogosmarketplace/static',
+    ]
+
+    # Media files configuration
+
+    # # The below URL is where the media files will be served from in development. It is the URL prefix for media files,.
+    MEDIA_URL = '/media/'
+
+    MEDIA_ROOT = BASE_DIR /'media'
 
 
-# The below URL is where the static files will be served from in development. It is the URL prefix for static files, for example, if you have static files in a directory called 'pogosmarketplace/static' in your project, they will be collected from 'pogosmarketplace/static/css/style.css' into the 'STATIC_ROOT = BASE_DIR / 'static'' and accessible at 'http://localhost:8000/static/css/style.css' after running the development server.
-STATIC_URL = '/static/'
+#-------------------------------LOGGING CONFIGURATION:------------------------------
+# This configuration sets up logging for your Django application.
+import logging
+from django.utils.log import AdminEmailHandler
 
-# Default primary key field type
-# https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
+# This stores logs inside your Django project instead of the system logs folder.
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": "{levelname} {asctime} {module} {message}",
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "verbose",
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": "WARNING",
+    },
+    "loggers": {
+        "django": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+    },
+}
 
+# To track errors better, include email logging for critical failures:
+# This configuration automatically sends an email(error report) to site administrators when a critical error occurs in production.
+# if ENVIRONMENT == "production":
+#     LOGGING["handlers"]["mail_admins"] = {
+#         "level": "ERROR",
+#         "class": "django.utils.log.AdminEmailHandler",
+#     }
+#     LOGGING["loggers"]["django"]["handlers"].append("mail_admins")
 
-# The below is where all the static files from 'STATICFILES_DIRS' will be collected to when you run the 'python manage.py collectstatic' command. This folder gets created automatically when you run the command 'python manage.py collectstatic'. It is the location where all static files are collected for production use.
-STATIC_ROOT = BASE_DIR /'static'
-
-
-# The below is where Django will look for static files in your project. You can add multiple directories here, and Django will look in each of them for static files. The paths should be relative to the base directory of your project.
-# For example, if you have a directory called 'pogosmarketplace/static' in your project, you would add it here. This is where Django will look for static files when you run the command ''python manage.py collectstatic' in development server.
-STATICFILES_DIRS = [
-    'pogosmarketplace/static',
-]
-
-
-# Media files configuration
-
-# # The below URL is where the media files will be served from in development. It is the URL prefix for media files,.
-MEDIA_URL = '/media/'
-
-MEDIA_ROOT = BASE_DIR /'media'
+#-------------------------------END OF LOGGING CONFIGURATION:-----------------------------------
 
 
 # Search for 'django messages' online, and check for the documentation and copy this and edit it as per your needs:
@@ -167,6 +259,13 @@ from django.contrib.messages import constants as messages
 MESSAGE_TAGS = {
     messages.ERROR: "danger",
 }
+
+#-------------------ADMIN CONFIGURATION:--------------------------
+
+ADMINS = [("Your Name", "your_email@example.com")]
+
+#------------------------------------------------------------------
+
 
 
 #--------------------SMTP CONFIGURATION:----------------------
@@ -190,6 +289,32 @@ EMAIL_USE_TLS = True
 
 EMAIL_TIMEOUT = 30
 
+
+#----------------CUSTOM_USER_MODEL_SETTINGS------------------------#
+AUTH_USER_MODEL = 'accounts.Account'  # Points to your custom model
+
+
+# ------------------ SECURITY SETTINGS ------------------ #
+CSRF_COOKIE_SECURE = True  # Enforce security for CSRF tokens
+SESSION_COOKIE_SECURE = True  # Secure session cookies
+SECURE_BROWSER_XSS_FILTER = True  # Enable browser XSS protection
+SECURE_CONTENT_TYPE_NOSNIFF = True  # Prevent MIME-based attacks
+SECURE_SSL_REDIRECT = False  # Set to True in production to force HTTPS
+
+# Additional security settings
+X_FRAME_OPTIONS = "DENY"  # Prevent clickjacking attacks
+SECURE_HSTS_SECONDS = 31536000  # Enforce HTTPS (recommended for production)
+SECURE_HSTS_INCLUDE_SUBDOMAINS = True  # Apply HTTPS to all subdomains
+SECURE_HSTS_PRELOAD = True  # Preload HSTS in browsers
+
+
+#-------------------PAYPAL SETTINGS--------------------------------#
+SECURE_CROSS_ORIGIN_OPENER_POLICY = 'same-origin-allow-popups'
+
+PAYPAL_CLIENT_ID = os.environ.get('PAYPAL_CLIENT_ID') # for sandbox
+PAYPAL_SECRET = os.environ.get('PAYPAL_SECRET') # for sandbox
+PAYPAL_API_BASE = os.environ.get('PAYPAL_API_BASE')  # for sandbox
+PAYPAL_MODE = "sandbox"  # for sandbox. Change to "live" for production
 
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
