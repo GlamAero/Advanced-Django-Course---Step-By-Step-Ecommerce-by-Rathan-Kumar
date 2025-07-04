@@ -1,56 +1,27 @@
 from django.shortcuts import render, get_object_or_404
-from store.models import Product
+from store.models import Product, VariationCombination
 from category.models import Category
 from carts.models import CartItem
 from carts.views import _cart_id
-from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
+from django.core.paginator import Paginator
 from django.db.models import Q
 
-
-# Create your views here.
+# Only show single products (no variations or combinations) in the store listing
 def store(request, category_slug=None):
     categories = None
     products = None
-    if category_slug != None:
-        # If a category slug is provided, filter products by that category
+    if category_slug:
         categories = get_object_or_404(Category, slug=category_slug)
         products = Product.objects.filter(category=categories, is_available=True)
-
-        # '6' is the number of products to display per page
-        # 'page' is the current page number
-
-        # Paginate products, 1 per page
-        paginator = Paginator(products, 1)
-
-        # Get the requested page number from the URL
-        page = request.GET.get('page')
-
-        # Get products for that page
-        paged_products = paginator.get_page(page)
-
-        # Get the count of products
-        product_count = products.count()
-
     else:
-        # If no category slug is provided, get all available products 
         products = Product.objects.filter(is_available=True).order_by('id')
 
-
-        # '3' is the number of products to display per page
-        # 'page' is the current page number
-
-        # Paginate products, 3 per page
-        paginator = Paginator(products, 3)
-
-        # Get the requested page number from the URL
-        page = request.GET.get('page')
-
-        # Get products for that page
-        paged_products = paginator.get_page(page)
-    
-        # Get the count of products
-        product_count = products.count()
-    
+    # Exclude products that are only variation combinations
+    # (Assumes VariationCombination is not shown in Product table)
+    paginator = Paginator(products, 6 if not category_slug else 6)
+    page = request.GET.get('page')
+    paged_products = paginator.get_page(page)
+    product_count = products.count()
 
     context = {
         'products': paged_products,
@@ -58,45 +29,46 @@ def store(request, category_slug=None):
     }
     return render(request, 'stores/store.html', context)
 
-
 def product_detail(request, category_slug, product_slug):
     try:
-        # Get the product by its slug and category
         single_product = Product.objects.get(category__slug=category_slug, slug=product_slug)
-
-        # checking if the product is in the cart
-        # 'exists()' returns True if the product is in the cart, otherwise False
         in_cart = CartItem.objects.filter(cart__cart_id=_cart_id(request), product=single_product).exists()
 
-    except Exception as e:
-        raise e
+        # Get variations and variation combinations for this product
+        variations = single_product.variation_set.filter(is_active=True)
+        variation_combinations = VariationCombination.objects.filter(product=single_product, is_active=True)
+
+        # Get unique variation categories for template use
+        variation_categories = variations.values_list('variation_category', flat=True).distinct()
+
+    except Product.DoesNotExist:
+        single_product = None
+        in_cart = False
+        variations = []
+        variation_combinations = []
+        variation_categories = []
 
     context = {
         'single_product': single_product,
         'in_cart': in_cart,
+        'variations': variations,
+        'variation_combinations': variation_combinations,
+        'variation_categories': variation_categories,
     }
     return render(request, 'stores/product_detail.html', context)
-    
 
 def search(request):
-    # 'keyword' is the key of the search value entered by the user
-    # 'request.GET' is a dictionary-like object containing the GET parameters(key-value pairs) of the request in the searchbar. This request is made when the user submits the search form with information to be searched for. This information is passed to the view function as a GET request.
-    # 'request.GET.get('keyword')' retrieves the 'value' of the 'keyword' parameter(key) from the GET request. 
+    context = {}
     if 'keyword' in request.GET:
         keyword = request.GET['keyword']
         if keyword:
-            # If a keyword is provided, filter products by that keyword
-            products = Product.objects.order_by('-created_date').filter(Q(description__icontains=keyword) | Q(product_name__icontains=keyword))
-            
+            products = Product.objects.order_by('-created_date').filter(
+                Q(description__icontains=keyword) | Q(product_name__icontains=keyword),
+                is_available=True
+            )
             product_count = products.count()
-
-        context = {
-            'products': products,
-            'product_count': product_count,
-        }
+            context = {
+                'products': products,
+                'product_count': product_count,
+            }
     return render(request, 'stores/store.html', context)
-
-
-
-
-

@@ -1,29 +1,37 @@
+
 from django.contrib import admin
-from .models import Product, Variation
-
-
-# Register your models here.
+from django import forms
+from .models import Product, Variation, VariationCombination
 
 class ProductAdmin(admin.ModelAdmin):
-
-    # 'list_display' specifies the fields to be displayed in the admin list view:
     list_display = ('product_name', 'price', 'stock', 'modified_date', 'is_available')
-
-    # 'prepopulated_fields' is used to automatically fill the slug field based on the product name when creating a new product
     prepopulated_fields = {'slug': ('product_name',)}
 
-
 class VariationAdmin(admin.ModelAdmin):
-
-    # 'list_display' specifies the fields to be displayed in the admin list view:
     list_display = ('product', 'variation_category', 'variation_value', 'is_active')
-
-    # this means to be able to edit the given('is_active') below in the admin front without needing to click on each variation to edit:
     list_editable = ('is_active',)
-
-    # to filter the below('product', 'variation_category', 'variation_value') in the admin front without needing to click on each variation to filter: 
     list_filter = ('product', 'variation_category', 'variation_value')
 
+class VariationCombinationForm(forms.ModelForm):
+    class Meta:
+        model = VariationCombination
+        fields = '__all__'
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Remove the "+" add button for variations to prevent duplicate variations
+        self.fields['variations'].widget.can_add_related = False
+
+class VariationCombinationAdmin(admin.ModelAdmin):
+    form = VariationCombinationForm
+    list_display = ('product', 'get_variations', 'stock', 'is_active', 'created_date')
+    list_editable = ('is_active',)
+    list_filter = ('product', 'is_active', 'created_date')
+
+    def get_variations(self, obj):
+        return ", ".join([f"{v.variation_category}:{v.variation_value}" for v in obj.variations.all()])
+    get_variations.short_description = 'Variations'
 
 admin.site.register(Product, ProductAdmin)
 admin.site.register(Variation, VariationAdmin)
+admin.site.register(VariationCombination, VariationCombinationAdmin)

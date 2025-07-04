@@ -9,6 +9,23 @@ Email: tejuojoayodeji@yahoo.com
 Username: tejuojoayodeji
 Password: Aerosmart777#
 
+
+
+PAYPAL: 
+Email used: olusayotejuojo@gmail.com
+Password: Aerosmart777
+
+PAYPAL SANDBOX:
+SELLER:
+email:pogossellerlly12@gmail.com
+password: 1234PERSONAL#
+ 
+BUYER:
+email:pogospersonally12@gmail.com
+password: 1234PERSONAL#
+
+
+
 THIS PROJECT TERMINAL IS THE GIT BASH
 
 NOTE: 1. CART: the cart related to the session created to hold all cart_items.

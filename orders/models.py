@@ -2,18 +2,9 @@ from django.db import models
 from accounts.models import Account
 from store.models import Product, Variation
 
-
-
-# Create your models here.
-
 class Payment(models.Model):
-    # Link the payment to the seller
     user = models.ForeignKey(Account, on_delete=models.CASCADE, related_name="payments")
-    
-    # for paypal in orders/views.py. This gets filled automatically when the 'Pay with PayPal' button is clicked because it is equal to the 'order_id' as defined in 'orders/views.py'.
     paypal_order_id = models.CharField(max_length=50, unique=True, null=True, blank=True)
-
-    # Adds transaction_id to store PayPal’s payment capture ID (captures[0].id). And it ensures compatibility with your capture_paypal_order function in orders/views.py. This gets filled after the payment has been completed
     transaction_id = models.CharField(max_length=100, unique=True, null=True, blank=True)
     payment_method = models.CharField(max_length=50, default="PayPal")
     order_total = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
@@ -29,8 +20,7 @@ class Payment(models.Model):
         ordering = ["-created_at"]
 
     def __str__(self):
-        return self.transaction_id
-    
+        return str(self.transaction_id)
 
 class Order(models.Model):
     STATUS = (
@@ -40,7 +30,6 @@ class Order(models.Model):
         ('Cancelled', 'Cancelled'),
     )
 
-    # Vendor who receives the order (seller)
     user = models.ForeignKey(Account, on_delete=models.SET_NULL, null=True)
     payment = models.ForeignKey(Payment, on_delete=models.SET_NULL, blank=True, null=True)
     order_number = models.CharField(max_length=50, unique=True)
@@ -73,14 +62,10 @@ class Order(models.Model):
     def __str__(self):
         return self.order_number
 
-
 class OrderProduct(models.Model):
     order = models.ForeignKey(Order, on_delete=models.CASCADE)
     payment = models.ForeignKey(Payment, on_delete=models.SET_NULL, blank=True, null=True)
-    
-    # Vendor who owns the product in the order
     user = models.ForeignKey(Account, on_delete=models.CASCADE)
-    
     product = models.ForeignKey(Product, on_delete=models.PROTECT)
     variations = models.ManyToManyField(Variation, blank=True)
     quantity = models.PositiveIntegerField()
@@ -92,4 +77,11 @@ class OrderProduct(models.Model):
     def __str__(self):
         return self.product.product_name
 
+    def is_single_product(self):
+        return self.variations.count() == 0
 
+    def is_variation_product(self):
+        return self.variations.count() == 1
+
+    def is_variation_combination(self):
+        return
