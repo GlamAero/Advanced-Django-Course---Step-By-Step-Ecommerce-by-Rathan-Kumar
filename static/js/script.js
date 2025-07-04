@@ -58,10 +58,6 @@ $(document).ready(function() {
 });
 // jquery end
 
-
-// to make the message(success, error, etc) disappear after 4 seconds
 setTimeout(function(){
-    $('#message').fadeOut('slow')
+  $('#message').fadeOut('slow')
 }, 4000)
-
-

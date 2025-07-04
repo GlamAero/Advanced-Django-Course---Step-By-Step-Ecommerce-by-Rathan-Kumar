@@ -196,8 +196,10 @@ else:
     # The below is where Django will look for static files in your project. You can add multiple directories here, and Django will look in each of them for static files. The paths should be relative to the base directory of your project.
     # For example, if you have a directory called 'pogosmarketplace/static' in your project, you would add it here. This is where Django will look for static files when you run the command ''python manage.py collectstatic' in development server.
     STATICFILES_DIRS = [
-        'pogosmarketplace/static',
+        BASE_DIR / "pogosmarketplace/static",
     ]
+
+
 
     # Media files configuration
 
