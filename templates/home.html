@@ -1,124 +1,50 @@
 {% extends 'base.html' %}
+
 {% load static %}
 
-{% block title %}Home - PogosMarketPlace{% endblock %}
+	{% block content %}
 
-{% block content %}
-<!-- ========================= SECTION MAIN ========================= -->
-<section class="section-intro padding-y-sm">
-    <div class="container">
-        <div class="intro-banner-wrap">
-            <!-- Add alt text for accessibility -->
-            <img src="{% static 'images/banners/cover.jpg' %}" 
-                 class="img-fluid rounded" 
-                 alt="PogosMarketPlace - Premium Shopping Experience">
-        </div>
-    </div>
-</section>
-<!-- ========================= SECTION MAIN END// ========================= -->
+		<!-- ========================= SECTION MAIN ========================= -->
+		<section class="section-intro padding-y-sm">
+			<div class="container">
 
-<!-- ========================= SECTION PRODUCTS ========================= -->
-<section class="section-name padding-y-sm">
-    <div class="container">
-        <header class="section-heading d-flex justify-content-between align-items-center mb-4">
-            <h2 class="section-title h3">Popular Products</h2>
-            <a href="{% url 'store' %}" class="btn btn-outline-primary">See all</a>
-        </header>
+				<div class="intro-banner-wrap">
+					<img src="{% static 'images/banners/cover.jpg' %}" class="img-fluid rounded">
+				</div>
 
-        <div class="row">
-            {% for item in product_data %}
-                {% with product=item.product display_price=item.display_price %}
-                    <div class="col-lg-3 col-md-4 col-sm-6 mb-4">
-                        <div class="card card-product-grid h-100 border-0 shadow-sm">
-                            <a href="{{ product.get_absolute_url }}" class="img-wrap position-relative">
-                                <!-- Add lazy loading and responsive image -->
-                                <img src="{{ product.images.url }}" 
-                                     class="card-img-top"
-                                     alt="{{ product.product_name }}"
-                                     loading="lazy">
-                                
-                                <!-- Add badge for discounts -->
-                                {% if product.discount_percentage > 0 %}
-                                <span class="badge bg-danger position-absolute top-0 start-0 m-2">
-                                    -{{ product.discount_percentage }}%
-                                </span>
-                                {% endif %}
-                            </a>
-                            <div class="card-body">
-                                <a href="{{ product.get_absolute_url }}" class="title h5 text-decoration-none text-dark">
-                                    {{ product.product_name|truncatechars:40 }}
-                                </a>
-                                <div class="price mt-2">
-                                    {% if display_price %}
-                                        <span class="h5 text-primary">{{ CURRENCY_SYMBOL }}{{ display_price }}</span>
-                                        {% if product.original_price and product.original_price > display_price %}
-                                            <small class="text-muted text-decoration-line-through ms-2">
-                                                {{ CURRENCY_SYMBOL }}{{ product.original_price }}
-                                            </small>
-                                        {% endif %}
-                                    {% else %}
-                                        <em class="text-muted">Price unavailable</em>
-                                    {% endif %}
-                                </div>
-                            </div>
-                            <div class="card-footer bg-white border-0">
-                                <!-- Add to cart button -->
-                                <button class="btn btn-sm btn-outline-primary w-100 add-to-cart" 
-                                        data-product="{{ product.id }}">
-                                    <i class="fas fa-shopping-cart me-1"></i> Add to Cart
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                {% endwith %}
-            {% empty %}
-                <div class="col-12">
-                    <div class="alert alert-info text-center">No popular products available</div>
-                </div>
-            {% endfor %}
-        </div>
-    </div>
-</section>
-<!-- ========================= SECTION PRODUCTS END// ========================= -->
+			</div> <!-- container //  -->
+		</section>
+		<!-- ========================= SECTION MAIN END// ========================= -->
 
-<!-- Add AJAX script for cart functionality -->
-{% block extra_scripts %}
-<script>
-$(document).ready(function() {
-    $('.add-to-cart').click(function() {
-        const productId = $(this).data('product');
-        
-        $.ajax({
-            type: 'POST',
-            url: '{% url "carts:add_to_cart" %}',
-            data: {
-                product_id: productId,
-                quantity: 1,
-                csrfmiddlewaretoken: "{{ csrf_token }}"
-            },
-            success: function(response) {
-                if (response.success) {
-                    // Show success toast
-                    const toast = `<div class="toast align-items-center text-white bg-success border-0 position-fixed bottom-0 end-0 m-3" role="alert">
-                        <div class="d-flex">
-                            <div class="toast-body">Product added to cart!</div>
-                            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
-                        </div>
-                    </div>`;
-                    $('body').append(toast);
-                    $('.toast').toast('show');
-                    
-                    // Update cart count
-                    $('.cart-count').text(response.cart_count);
-                    
-                    // Remove toast after 3 seconds
-                    setTimeout(() => $('.toast').toast('dispose'), 3000);
-                }
-            }
-        });
-    });
-});
-</script>
-{% endblock %}
-{% endblock %}
+		<!-- ========================= SECTION  ========================= -->
+		<section class="section-name padding-y-sm">
+			<div class="container">
 
+				<header class="section-heading">
+					<a href="{% url 'store' %}" class="btn btn-outline-primary float-right">See all</a>
+					<h3 class="section-title">Popular products</h3>
+				</header><!-- sect-heading -->
+
+		
+				<div class="row">
+					{% for product in products %}
+
+						<!-- 'get_url' is a method in the models.py file of the store app. It returns the url of the named product. -->
+						<div class="col-md-3">
+							<div class="card card-product-grid">
+								<a href="{{ product.get_url }}" class="img-wrap"> <img src="{{ product.images.url }}" alt=""></a>
+								<figcaption class="info-wrap">
+									<a href="{{ product.get_url }}" class="title">{{ product.product_name }}</a>
+									<div class="price mt-1">${{ product.price }}</div> <!-- price-wrap.// -->
+								</figcaption>
+							</div>
+						</div> <!-- col.// -->
+
+					{% endfor %}
+				</div> <!-- row.// -->
+
+			</div><!-- container // -->
+		</section>
+		<!-- ========================= SECTION  END// ========================= -->
+
+	{% endblock %}

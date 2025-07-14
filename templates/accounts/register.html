@@ -1,105 +1,85 @@
 {% extends 'base.html' %}
 
-{% block title %}Register{% endblock %}
 
 {% block content %}
-<section class="section-content py-4">
 
-    <!-- ============================ REGISTER COMPONENT ============================ -->
-    <div class="card mx-auto" style="max-width: 520px; margin-top: 10px;">
+    <section class="section-content padding-y">
+
+<!-- ============================ COMPONENT REGISTER   ================================= -->
+	<div class="card mx-auto" style="max-width:520px; margin-top:40px;">
         <article class="card-body">
 
-            <!-- Alert Messages -->
-            {% include 'includes/alerts.html' %}
+			<!--GET ERROR MESSAGES-->
+			{% include 'includes/alerts.html' %}
 
-            <header class="mb-4">
-                <h4 class="card-title">Sign Up</h4>
-            </header>
-
-            <form method="POST" action="{% url 'accounts:register' %}">
+		    <header class="mb-4"><h4 class="card-title">Sign up</h4></header>
+		    <form action="{% url 'register' %}" method="POST">
                 {% csrf_token %}
 
-                <div class="form-row">
-                    <div class="form-group col-md-6">
-                        <label for="id_first_name">First Name</label>
-                        {{ form.first_name }}
-                        {{ form.first_name.errors }}
-                    </div>
-                    <div class="form-group col-md-6">
-                        <label for="id_last_name">Last Name</label>
+				<div class="form-row">
+					<div class="col form-group">
+						<label>First name</label>
+
+					    {{ form.first_name }}
+
+					</div> <!-- form-group end.// -->
+					<div class="col form-group">
+						<label>Last name</label>
+					    
                         {{ form.last_name }}
-                        {{ form.last_name.errors }}
-                    </div>
-                </div>
 
-                <div class="form-row">
-                    <div class="form-group col-md-6">
-                        <label for="id_email">Email Address</label>
+					</div> <!-- form-group end.// -->
+				</div> <!-- form-row end.// -->
+
+				<div class="form-row">
+					<div class="form-group col-md-6">
+					    <label>Email Address</label>
+					    
                         {{ form.email }}
-                        {{ form.email.errors }}
-                    </div>
-                    <div class="form-group col-md-6">
-                        <label for="id_phone_number">Phone Number</label>
+
+					</div> <!-- form-group end.// -->
+					<div class="form-group col-md-6">
+					    <label>Phone Number</label>
+					    
                         {{ form.phone_number }}
-                        {{ form.phone_number.errors }}
-                    </div>
-                </div>
 
-                <div class="form-row">
-                    <div class="form-group col-md-6">
-                        <label for="id_password">Create Password</label>
-                        {{ form.password }}
-                        {{ form.password.errors }}
-                    </div>
-                    <div class="form-group col-md-6">
-                        <label for="id_confirm_password">Repeat Password</label>
-                        {{ form.confirm_password }}
-                        {{ form.confirm_password.errors }}
-                    </div>
-                </div>
+					</div> <!-- form-group end.// -->
+				</div> <!-- form-row.// -->
+				<div class="form-row">
+					<div class="form-group col-md-6">
+						<label>Create password</label>
+					    {{ form.password }}
+					</div> <!-- form-group end.// --> 
+					<div class="form-group col-md-6">
+						<label>Repeat password</label>
+					    {{ form.confirm_password }}
+					</div> <!-- form-group end.// -->  
+				</div>
 
-                {% if form.non_field_errors %}
-                    <div class="alert alert-danger" role="alert">
-                        {{ form.non_field_errors }}
-                    </div>
-                {% endif %}
+				<div class="form-group">
+					<p class="text-muted">By clicking the "Register" button, you agree to our <a href="#">Terms of Use</a> and <a href="#">Privacy Policy</a>.</p>
+				</div> <!-- form-group// -->
 
-                <div class="form-group">
-                    <p class="text-muted small">
-                        By clicking <strong>Register</strong>, you agree to our 
-                        <a href="#" class="text-decoration-underline">Terms of Use</a> and 
-                        <a href="#" class="text-decoration-underline">Privacy Policy</a>.
-                    </p>
-                </div>
+			    <div class="form-group">
+			        <button type="submit" class="btn btn-primary btn-block"> Register  </button>
+			    </div> <!-- form-group// -->   
+				
+				<!--this is a field error, that is it is specific to a particular field in the form e.g 'Email already exists'-->
+				{{ form.email.errors }}
 
-                <div class="form-group">
-                    <button type="submit" class="btn btn-primary btn-block">Register</button>
-                </div>
-            </form>
-        </article>
-    </div>
+				<!--this is a non-field error. It displays errors that affect the entire form, and not a single field. It is typically used for validation done in the form’s clean() method when multiple fields are checked together e.g errors for 'passwords not matching'-->
+				{{ form.non_field_errors }}
 
-    <div class="d-flex justify-content-center align-items-center mt-4 gap-2 flex-wrap">
-        <span class="text-secondary me-2">Already have an account? Login as:</span>
-
-        <a href="{% url 'login' %}?type=customer" 
-        class="text-primary text-decoration-none me-2 ml-1"
-        role="button" aria-label="Customer Login">
-            Customer
-        </a>
-
-        <span class="text-muted mx-1">|</span>
-
-        <a href="{% url 'login' %}?type=vendor" 
-        class="text-primary text-decoration-none"
-        role="button" aria-label="Vendor Login">
-            Vendor
-        </a>
-    </div>
-
-
+			</form>
+		</article><!-- card-body.// -->
+    </div> <!-- card .// -->
+    <p class="text-center mt-4">Have an account?<a href="{% url 'login' %}">Log In</a></p>
     <br><br>
-    <!-- ============================ REGISTER COMPONENT END ============================ -->
+<!-- ============================ COMPONENT REGISTER  END.// ================================= -->
+
 
 </section>
+<!-- ========================= SECTION CONTENT END// ========================= -->
+
+
 {% endblock %}

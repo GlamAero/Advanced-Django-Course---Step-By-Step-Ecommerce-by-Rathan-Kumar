@@ -1,6 +1,12 @@
 from django.contrib import admin
 
 class LowStockFilter(admin.SimpleListFilter):
+    """
+    Sidebar filter for identifying products with low inventory.
+
+    Displays a filter option labeled "⚠ Low Stock (≤5)" that,
+    when selected, narrows the list to products with stock ≤ 5.
+    """
     title = 'Stock Level'
     parameter_name = 'stock_status'
 
@@ -10,23 +16,27 @@ class LowStockFilter(admin.SimpleListFilter):
         ]
 
     def queryset(self, request, queryset):
-        if self.value() == 'low':
+        value = self.value()
+        if value == 'low':
             return queryset.filter(stock__lte=5)
         return queryset
     
 
-class VendorFilter(admin.SimpleListFilter):
-    title = 'Vendor'
-    parameter_name = 'vendor'
+class ProductTypeFilter(admin.SimpleListFilter):
+    """
+    Custom admin filter to allow filtering by the product's type.
+    """
+    title = 'Product Type'
+    parameter_name = 'product_type'
 
     def lookups(self, request, model_admin):
-        vendors = set([p.vendor for p in model_admin.model.objects.all()])
-        return [(v.id, v.company_name) for v in vendors]
+        return [
+            ('variation', 'Products with Variations'),
+            ('combination', 'Products with Variation Combinations'),
+        ]
 
     def queryset(self, request, queryset):
-        if self.value():
-            return queryset.filter(vendor__id=self.value())
+        value = self.value()
+        if value:
+            return queryset.filter(product__product_type=value)
         return queryset
-    
-
-    

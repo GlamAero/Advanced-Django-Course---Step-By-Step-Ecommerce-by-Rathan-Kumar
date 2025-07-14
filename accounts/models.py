@@ -1,146 +1,90 @@
 from django.db import models
-from django.conf import settings
-from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
-from django.core.validators import FileExtensionValidator
-from django_otp.models import Device
-from django_otp.plugins.otp_static.models import StaticDevice
-from django.db.models.signals import post_save
-from django.dispatch import receiver
-from accounts.managers import MyAccountManager
+from django.contrib.auth.models import AbstractBaseUser, BaseUserManager
+
+# to create custom user model:
+
+# here we use the model class:'Account' below to make this model class:'MyAccountManager' work:
+class MyAccountManager(BaseUserManager):
+
+    # creating a normal user:
+    # only core fields are here, thus you will notice that 'phone_number' is not present here, since 'phone_number' is set to 'blank=True'(optional) in the Account class model below.
+    def create_user(self, first_name, last_name, username, email, password=None):
+        if not email: 
+            raise ValueError('User must have an email address')
+        
+        if not username:
+            raise ValueError('User must have a username')
+        
+        # in the below, 'self.normalize_email' is a method that normalizes the email address by converting it to lowercase and removing any leading or trailing whitespace:
+        user = self.model(
+            email=self.normalize_email(email),
+            username=username,
+            first_name=first_name,
+            last_name=last_name
+        )
+
+        # change the password to the hashed version of the password:
+        user.set_password(password)  
+        user.save(using=self._db)
+        return user
 
 
-class Account(AbstractBaseUser, PermissionsMixin):
-    ROLE_CHOICES = (
-        ('vendor', 'Vendor'),
-        ('customer', 'Customer'),
-        ('admin', 'Admin'),
-    )
+    # creating a superuser:
+    def create_superuser(self, first_name, last_name, email, username, password):
+        user = self.create_user(
+            email=self.normalize_email(email),
+            username=username,
+            password=password,
+            first_name=first_name,
+            last_name=last_name
+        )
 
+        # set the superuser permissions:
+        user.is_admin = True
+        user.is_active = True
+        user.is_staff = True 
+        user.is_superadmin = True
+        user.save(using=self._db)
+        return user
+
+
+
+# Create your models here:
+class Account(AbstractBaseUser):
     first_name = models.CharField(max_length=30)
     last_name = models.CharField(max_length=30)
     username = models.CharField(max_length=30, unique=True)
     email = models.EmailField(max_length=254, unique=True)
+
+    # since 'phone_number' can be blank as set below, in the 'create_user' function above, 'phone number' is not there since it is optional and not a core field
     phone_number = models.CharField(max_length=15, blank=True)
-    role = models.CharField(max_length=10, choices=ROLE_CHOICES, default='customer')
+    
+    # Required fields
     date_joined = models.DateTimeField(auto_now_add=True)
-    last_login = models.DateTimeField(auto_now=True)
+    last_login = models.DateTimeField(auto_now_add=True)
     is_admin = models.BooleanField(default=False)
     is_staff = models.BooleanField(default=False)
     is_active = models.BooleanField(default=False)
     is_superadmin = models.BooleanField(default=False)
-    requires_2fa = models.BooleanField(default=False, verbose_name="Requires 2FA")
-    email_verified = models.BooleanField(default=False)
 
+
+    # 'USERNAME FIELD' here means to specify the content expected in the default 'USERNAME' field when 'logging in' to the admin. This overides the default 'USERNAME' field expected to be filled in, with 'EMAIL'.
     USERNAME_FIELD = 'email'
+
+    # This is the required filled expected to be filled by the user when 'signing up' for access to the custom django user admin page:
     REQUIRED_FIELDS = ['username', 'first_name', 'last_name']
 
+    # telling this model 'Account', that it is being used in another model above called 'MyAccountManager':
     objects = MyAccountManager()
 
     def __str__(self):
         return self.email
 
+
+    # This gives full permission to the admin to make modifications necessary in the page as he deems fit
     def has_perm(self, perm, obj=None):
-        return self.is_admin or self.is_superadmin
-
-    def has_module_perms(self, app_label):
-        return self.is_admin or self.is_superadmin
-
-    @property
-    def is_superuser(self):
-        return self.is_superadmin
-
-    def is_vendor(self):
-        return self.role == 'vendor'
-
-    def is_customer(self):
-        return self.role == 'customer'
+        return self.is_admin
     
-    def verify_token(self, token):
-        for device in Device.objects.filter(user=self):
-            if device.verify_token(token):
-                return True
-        return False
+    def has_module_perms(self, add_label):
+        return True
 
-    def get_backup_tokens(self):
-        device, created = StaticDevice.objects.get_or_create(user=self, name='backup')
-        return device.token_set.values_list('token', flat=True)
-
-def vendor_license_path(instance, filename):
-    return f'vendors/{instance.user.id}/licenses/{filename}'
-
-def vendor_profile_image_path(instance, filename):
-    return f'vendors/{instance.user.id}/profile_images/{filename}'
-
-class VendorProfile(models.Model):
-    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
-    company_name = models.CharField(max_length=255, blank=True)
-    business_license_number = models.CharField(max_length=100, blank=True)
-    website = models.URLField(blank=True)
-    address = models.TextField(blank=True)
-    business_license_file = models.FileField(
-        upload_to=vendor_license_path,
-        validators=[FileExtensionValidator(['pdf', 'jpg', 'jpeg', 'png'])],
-        blank=True,
-        null=True
-    )
-    profile_image = models.ImageField(
-        upload_to=vendor_profile_image_path,
-        validators=[FileExtensionValidator(['jpg', 'jpeg', 'png'])],
-        blank=True,
-        null=True,
-        help_text="Upload a profile image (jpg, jpeg, png)."
-    )
-    is_verified = models.BooleanField(default=False, help_text="Is the vendor profile verified?")
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-    business_license_expiry = models.DateField(null=True, blank=True)
-
-    def clean(self):
-    if self.business_license_expiry and self.business_license_expiry < timezone.now().date():
-        raise ValidationError("Business license has expired")
-
-    def __str__(self):
-        return f"Vendor Profile for {self.user.email}"
-
-class CustomerProfile(models.Model):
-    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
-    date_of_birth = models.DateField(null=True, blank=True)
-    preferred_contact_method = models.CharField(max_length=50, blank=True)
-    shipping_address = models.TextField(blank=True)
-    billing_address = models.TextField(blank=True)
-    preferences = models.TextField(blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    def __str__(self):
-        return f"CustomerProfile for {self.user.email}"
-
-from django.db import models
-from accounts.models import Account  # Adjust import as per your project structure
-
-class UserActivity(models.Model):
-    ACTIVITY_TYPES = [
-        ('login', 'Login'),
-        ('logout', 'Logout'),
-        ('account_activated', 'Account Activated'),
-        ('password_reset_requested', 'Password Reset Requested'),
-        ('password_reset', 'Password Reset'),
-        ('profile_update', 'Profile Updated'),
-    ]
-    
-    user = models.ForeignKey(Account, on_delete=models.CASCADE, related_name='activities')
-    activity_type = models.CharField(max_length=50, choices=ACTIVITY_TYPES)
-    ip_address = models.GenericIPAddressField()
-    user_agent = models.CharField(max_length=500)
-    timestamp = models.DateTimeField(auto_now_add=True)
-    
-    class Meta:
-        ordering = ['-timestamp']
-        verbose_name_plural = 'User Activities'
-        indexes = [
-            models.Index(fields=['-timestamp']),
-            models.Index(fields=['activity_type']),
-        ]
-        
-    def __str__(self):
-        return f"{self.get_activity_type_display()} by {self.user.email}"
