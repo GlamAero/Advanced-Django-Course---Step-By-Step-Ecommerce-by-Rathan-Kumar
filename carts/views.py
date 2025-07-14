@@ -1,213 +1,499 @@
+from django import forms
 from django.shortcuts import render, redirect, get_object_or_404
-from store.models import Product, Variation, VariationCombination
-from .models import Cart, CartItem
-from django.http import HttpResponse
-from django.contrib.auth.decorators import login_required
+from django.http import JsonResponse, HttpResponseBadRequest
+from django.contrib import messages
+from django.db import transaction, IntegrityError
+from django.core.exceptions import ValidationError
 from decimal import Decimal
+from django.db.models import Sum
+from django.utils import timezone
+from datetime import timedelta
+from accounts.decorators import customer_required
+from store.models import Product, Variation, VariationCombination
+from coupons.models import Coupon
+from .models import Cart, CartItem
+from django_ratelimit.decorators import ratelimit
+from django.views.decorators.csrf import csrf_protect
+
 
 
 def _cart_id(request):
-    cart = request.session.session_key
-    if not cart:
+    if not request.session.session_key:
         request.session.create()
-        cart = request.session.session_key
-    return cart
+    return request.session.session_key
 
+@ratelimit(key='ip', rate='30/m')
+@csrf_protect
 def add_cart(request, product_id):
+    product = get_object_or_404(Product, id=product_id, is_available=True)
     current_user = request.user
-    product = get_object_or_404(Product, id=product_id)
-    product_variation = []
 
+    # Process variations from POST data
+    product_variations = []
     if request.method == 'POST':
-        for item in request.POST:
-            key = item
-            value = request.POST[key]
-            try:
-                variation = Variation.objects.get(product=product, variation_category__iexact=key, variation_value__iexact=value)
-                product_variation.append(variation)
-            except:
-                pass
+        for key in request.POST:
+            if key.startswith('variation_'):
+                try:
+                    variation = Variation.objects.get(
+                        product=product,
+                        variation_category=key.replace('variation_', ''),
+                        variation_value=request.POST[key]
+                    )
+                    product_variations.append(variation)
+                except Variation.DoesNotExist:
+                    # Variation specified does not exist for this product, ignore or handle as needed
+                    pass
 
-    # --- Check for valid VariationCombination if variations are selected ---
-    if product_variation:
-        # Try to find a matching VariationCombination for this product and these variations
+    # Validate variation combination
+    if product_variations:
         possible_combinations = VariationCombination.objects.filter(
             product=product,
             is_active=True,
-            stock__gte=1
+            stock__gt=0
         )
-        # Only keep combinations that have exactly the same variations as selected
-        found_comb = None
-        for comb in possible_combinations:
-            comb_variations = list(comb.variations.all())
-            if sorted(comb_variations, key=lambda v: v.id) == sorted(product_variation, key=lambda v: v.id):
-                found_comb = comb
+
+        matching_combination = None
+        for combination in possible_combinations:
+            # Compare sets of variations for exact match
+            if set(combination.variations.all()) == set(product_variations):
+                matching_combination = combination
                 break
-        if not found_comb:
-            # No valid combination exists, show error or redirect with message
-            return render(request, 'stores/combination_error.html', {
-                'error_message': "This combination is not available or out of stock."
+
+        if not matching_combination:
+            return JsonResponse({
+                'status': 'error',
+                'message': 'This combination is not available'
             }, status=400)
 
-    # --- Existing logic for adding to cart ---
-    if current_user.is_authenticated:
-        is_cart_item_exists = CartItem.objects.filter(product=product, user=current_user).exists()
-        if is_cart_item_exists:
-            cart_item = CartItem.objects.filter(product=product, user=current_user)
-            ex_var_list = []
-            id = []
-            for item in cart_item:
-                existing_variation = item.variations.all()
-                ex_var_list.append(list(existing_variation))
-                id.append(item.id)
-            if product_variation in ex_var_list:
-                index = ex_var_list.index(product_variation)
-                item_id = id[index]
-                item = CartItem.objects.get(product=product, id=item_id)
-                item.quantity += 1
-                item.save()
-            else:
-                item = CartItem.objects.create(product=product, quantity=1, user=current_user)
-                if len(product_variation) > 0:
-                    item.variations.clear()
-                    item.variations.add(*product_variation)
-                item.save()
-        else:
-            cart_item = CartItem.objects.create(
+    cart = get_or_create_cart(request)
+
+    try:
+        with transaction.atomic():
+            # Query for existing cart items with the same product and cart
+            cart_items = CartItem.objects.filter(
                 product=product,
-                quantity=1,
-                user=current_user,
-            )
-            if len(product_variation) > 0:
-                cart_item.variations.clear()
-                cart_item.variations.add(*product_variation)
-            cart_item.save()
-        return redirect('cart')
-    else:
-        try:
-            cart = Cart.objects.get(cart_id=_cart_id(request))
-        except Cart.DoesNotExist:
-            cart = Cart.objects.create(cart_id=_cart_id(request))
-        cart.save()
-        is_cart_item_exists = CartItem.objects.filter(product=product, cart=cart).exists()
-        if is_cart_item_exists:
-            cart_item = CartItem.objects.filter(product=product, cart=cart)
-            ex_var_list = []
-            id = []
-            for item in cart_item:
-                existing_variation = item.variations.all()
-                ex_var_list.append(list(existing_variation))
-                id.append(item.id)
-            if product_variation in ex_var_list:
-                index = ex_var_list.index(product_variation)
-                item_id = id[index]
-                item = CartItem.objects.get(product=product, id=item_id)
-                item.quantity += 1
-                item.save()
-            else:
-                item = CartItem.objects.create(product=product, quantity=1, cart=cart)
-                if len(product_variation) > 0:
-                    item.variations.clear()
-                    item.variations.add(*product_variation)
-                item.save()
-        else:
-            cart_item = CartItem.objects.create(
-                product=product,
-                quantity=1,
                 cart=cart,
+                user=current_user if current_user.is_authenticated else None
             )
-            if len(product_variation) > 0:
-                cart_item.variations.clear()
-                cart_item.variations.add(*product_variation)
-            cart_item.save()
-        return redirect('cart')
+
+            if product_variations:
+                # Filter cart items that have exactly the same variations
+                # Annotate with count of variations, filter by count and variations
+                variation_ids = [v.id for v in product_variations]
+                cart_items = cart_items.filter(
+                    variations__id__in=variation_ids
+                ).annotate(
+                    variation_count=Count('variations')
+                ).filter(
+                    variation_count=len(variation_ids)
+                ).distinct()
+
+            if cart_items.exists():
+                item = cart_items.first()
+                item.quantity += 1
+                item.clean()
+                item.save()
+            else:
+                item = CartItem.objects.create(
+                    product=product,
+                    quantity=1,
+                    cart=cart,
+                    user=current_user if current_user.is_authenticated else None
+                )
+                if product_variations:
+                    item.variations.set(product_variations)
+
+                item.clean()
+                item.save()
+
+            # Update cart activity timestamp
+            cart.last_activity = timezone.now()
+            cart.save()
+
+            # Calculate total cart items count
+            total_quantity = cart.cart_items.filter(is_active=True).aggregate(
+                total=Sum('quantity')
+            )['total'] or 0
+
+            return JsonResponse({
+                'status': 'success',
+                'cart_count': total_quantity,
+                'message': 'Product added to cart',
+                'cart_total': str(cart.grand_total)
+            })
+
+    except (ValidationError, IntegrityError) as e:
+        return JsonResponse({
+            'status': 'error',
+            'message': str(e)
+        }, status=400)
+
+    except Exception:
+        return JsonResponse({
+            'status': 'error',
+            'message': 'Server error'
+        }, status=500)
+
+
+@ratelimit(key='ip', rate='30/m')
+@csrf_protect
+def add_cart(request, product_id):
+    product = get_object_or_404(Product, id=product_id, is_available=True)
+    current_user = request.user
+
+    # Process variations from POST data
+    product_variations = []
+    if request.method == 'POST':
+        for key in request.POST:
+            if key.startswith('variation_'):
+                try:
+                    variation = Variation.objects.get(
+                        product=product,
+                        variation_category=key.replace('variation_', ''),
+                        variation_value=request.POST[key]
+                    )
+                    product_variations.append(variation)
+                except Variation.DoesNotExist:
+                    # Variation specified does not exist for this product, ignore or handle as needed
+                    pass
+
+    # Validate variation combination
+    if product_variations:
+        possible_combinations = VariationCombination.objects.filter(
+            product=product,
+            is_active=True,
+            stock__gt=0
+        )
+
+        matching_combination = None
+        for combination in possible_combinations:
+            # Compare sets of variations for exact match
+            if set(combination.variations.all()) == set(product_variations):
+                matching_combination = combination
+                break
+
+        if not matching_combination:
+            return JsonResponse({
+                'status': 'error',
+                'message': 'This combination is not available'
+            }, status=400)
+
+    cart = get_or_create_cart(request)
+
+    try:
+        with transaction.atomic():
+            # Query for existing cart items with the same product and cart
+            cart_items = CartItem.objects.filter(
+                product=product,
+                cart=cart,
+                user=current_user if current_user.is_authenticated else None
+            )
+
+            if product_variations:
+                # Filter cart items that have exactly the same variations
+                # Annotate with count of variations, filter by count and variations
+                variation_ids = [v.id for v in product_variations]
+                cart_items = cart_items.filter(
+                    variations__id__in=variation_ids
+                ).annotate(
+                    variation_count=Count('variations')
+                ).filter(
+                    variation_count=len(variation_ids)
+                ).distinct()
+
+            if cart_items.exists():
+                item = cart_items.first()
+                item.quantity += 1
+                item.clean()
+                item.save()
+            else:
+                item = CartItem.objects.create(
+                    product=product,
+                    quantity=1,
+                    cart=cart,
+                    user=current_user if current_user.is_authenticated else None
+                )
+                if product_variations:
+                    item.variations.set(product_variations)
+
+                item.clean()
+                item.save()
+
+            # Update cart activity timestamp
+            cart.last_activity = timezone.now()
+            cart.save()
+
+            # Calculate total cart items count
+            total_quantity = cart.cart_items.filter(is_active=True).aggregate(
+                total=Sum('quantity')
+            )['total'] or 0
+
+            return JsonResponse({
+                'status': 'success',
+                'cart_count': total_quantity,
+                'message': 'Product added to cart',
+                'cart_total': str(cart.grand_total)
+            })
+
+    except (ValidationError, IntegrityError) as e:
+        return JsonResponse({
+            'status': 'error',
+            'message': str(e)
+        }, status=400)
+
+    except Exception:
+        return JsonResponse({
+            'status': 'error',
+            'message': 'Server error'
+        }, status=500)
+
 
 def remove_cart(request, product_id, cart_item_id):
-    product = get_object_or_404(Product, id=product_id)
     try:
+        product = get_object_or_404(Product, id=product_id)
+        cart = get_or_create_cart(request)
+        
         if request.user.is_authenticated:
-            cart_item = CartItem.objects.get(product=product, user=request.user, id=cart_item_id)
+            cart_item = CartItem.objects.get(
+                id=cart_item_id,
+                product=product,
+                user=request.user,
+                cart=cart
+            )
         else:
-            cart = Cart.objects.get(cart_id=_cart_id(request))
-            cart_item = CartItem.objects.get(product=product, cart=cart, id=cart_item_id)
+            cart_item = CartItem.objects.get(
+                id=cart_item_id,
+                product=product,
+                cart=cart
+            )
+        
         if cart_item.quantity > 1:
             cart_item.quantity -= 1
             cart_item.save()
         else:
             cart_item.delete()
-    except:
-        pass
-    return redirect('cart')
+            
+        # Update cart activity timestamp
+        cart.last_activity = timezone.now()
+        cart.save()
+        
+        return redirect('cart')
+    
+    except CartItem.DoesNotExist:
+        messages.error(request, 'Cart item not found')
+        return redirect('cart')
 
 def remove_cart_item(request, product_id, cart_item_id):
-    product = get_object_or_404(Product, id=product_id)
-    if request.user.is_authenticated:
-        cart_item = CartItem.objects.get(product=product, user=request.user, id=cart_item_id)
-    else:
-        cart = Cart.objects.get(cart_id=_cart_id(request))
-        cart_item = CartItem.objects.get(product=product, cart=cart, id=cart_item_id)
-    cart_item.delete()
+    try:
+        product = get_object_or_404(Product, id=product_id)
+        cart = get_or_create_cart(request)
+        
+        if request.user.is_authenticated:
+            cart_item = CartItem.objects.get(
+                id=cart_item_id,
+                product=product,
+                user=request.user,
+                cart=cart
+            )
+        else:
+            cart_item = CartItem.objects.get(
+                id=cart_item_id,
+                product=product,
+                cart=cart
+            )
+        
+        cart_item.delete()
+        
+        # Update cart activity timestamp
+        cart.last_activity = timezone.now()
+        cart.save()
+        
+        return redirect('cart')
+    
+    except CartItem.DoesNotExist:
+        messages.error(request, 'Cart item not found')
+        return redirect('cart')
+
+def update_cart_item(request, cart_item_id):
+    if request.headers.get('x-requested-with') == 'XMLHttpRequest' and request.method == 'POST':
+        try:
+            quantity = int(request.POST.get('quantity', 1))
+            coupon_code = request.POST.get('coupon_code', '')
+            
+            if quantity < 1:
+                return JsonResponse({'status': 'error', 'message': 'Invalid quantity'}, status=400)
+            
+            if request.user.is_authenticated:
+                cart_item = CartItem.objects.get(
+                    id=cart_item_id,
+                    user=request.user,
+                    is_active=True
+                )
+            else:
+                cart = get_or_create_cart(request)
+                cart_item = CartItem.objects.get(
+                    id=cart_item_id,
+                    cart=cart,
+                    is_active=True
+                )
+            
+            # Check stock
+            combination = cart_item.get_variation_combination()
+            if combination and combination.stock < quantity:
+                return JsonResponse({
+                    'status': 'error',
+                    'message': f'Only {combination.stock} available in stock'
+                }, status=400)
+            
+            cart_item.quantity = quantity
+            cart_item.clean()
+            cart_item.save()
+            
+            cart = cart_item.cart
+            
+            # Apply coupon if valid
+            discount_amount = Decimal('0.00')
+            coupon = None
+            if coupon_code:
+                try:
+                    coupon = Coupon.objects.get(
+                        code__iexact=coupon_code,
+                        active=True,
+                        valid_from__lte=timezone.now(),
+                        valid_to__gte=timezone.now()
+                    )
+                    if cart.is_eligible_for_discount(coupon):
+                        cart.apply_coupon(coupon)
+                        discount_amount = coupon.discount
+                    else:
+                        coupon = None
+                except Coupon.DoesNotExist:
+                    coupon = None
+            
+            # Update cart activity timestamp
+            cart.last_activity = timezone.now()
+            cart.save()
+            
+            return JsonResponse({
+                'status': 'success',
+                'subtotal': str(cart_item.sub_total),
+                'discount': str(cart.discount),
+                'shipping': str(cart.shipping_cost),
+                'tax': str(cart.tax),
+                'grand_total': str(cart.grand_total),
+                'coupon_code': coupon.code if coupon else '',
+                'discount_amount': str(discount_amount)
+            })
+        
+        except (CartItem.DoesNotExist, ValueError) as e:
+            return JsonResponse({'status': 'error', 'message': str(e)}, status=400)
+    
+    return JsonResponse({'status': 'error'}, status=405)
+
+def apply_coupon(request):
+    if request.method == 'POST':
+        coupon_code = request.POST.get('coupon_code', '').strip()
+        cart = get_or_create_cart(request)
+        
+        try:
+            coupon = Coupon.objects.get(
+                code__iexact=coupon_code,
+                active=True,
+                valid_from__lte=timezone.now(),
+                valid_to__gte=timezone.now()
+            )
+            
+            if cart.is_eligible_for_discount(coupon):
+                cart.apply_coupon(coupon)
+                messages.success(request, f"Coupon '{coupon.code}' applied successfully!")
+            else:
+                messages.error(request, "This coupon is not valid for your cart")
+                
+        except Coupon.DoesNotExist:
+            messages.error(request, "Invalid coupon code")
+        
+        # Update cart activity timestamp
+        cart.last_activity = timezone.now()
+        cart.save()
+        
     return redirect('cart')
 
-
-def cart(request, total=Decimal('0.00'), quantity=0, cart_items=None):
-    try:
-        tax = Decimal('0.00')
-        grand_total = Decimal('0.00')
-
-        if request.user.is_authenticated:
-            cart_items = CartItem.objects.filter(user=request.user, is_active=True)
-        else:
-            cart = Cart.objects.get(cart_id=_cart_id(request))
-            cart_items = CartItem.objects.filter(cart=cart, is_active=True)
-
-        for cart_item in cart_items:
-            total += cart_item.product.price * cart_item.quantity
-            quantity += cart_item.quantity
-
-        tax = total * Decimal('0.02')
-        grand_total = total + tax
-
-    except Cart.DoesNotExist:
-        cart_items = []
-        total = Decimal('0.00')
-        quantity = 0
-        tax = Decimal('0.00')
-        grand_total = Decimal('0.00')
-
-    context = {
-        'total': total,
-        'quantity': quantity,
-        'cart_items': cart_items,
-        'tax': tax,
-        'grand_total': grand_total,
-    }
-    return render(request, 'stores/cart.html', context)
-
-
-@login_required(login_url='login')
-def checkout(request, total=0, quantity=0, cart_items=None):
-    try:
-        tax = 0
-        grand_total = 0
-        if request.user.is_authenticated:
-            cart_items = CartItem.objects.filter(user=request.user, is_active=True)
-        else:
-            cart = Cart.objects.get(cart_id=_cart_id(request))
-            cart_items = CartItem.objects.filter(cart=cart, is_active=True)
-        for cart_item in cart_items:
-            total += (cart_item.product.price * cart_item.quantity)
-            quantity += cart_item.quantity
-        tax = total * Decimal('0.02')
-        grand_total = total + tax
-    except Cart.DoesNotExist:
-        pass
-    context = {
-        'total': total,
-        'quantity': quantity,
-        'cart_items': cart_items,
-        'tax': tax,
-        'grand_total': grand_total,
-    }
-    return render(request, 'stores/checkout.html', context)
+def remove_coupon(request):
+    cart = get_or_create_cart(request)
+    if cart.coupon:
+        coupon_code = cart.coupon.code
+        cart.remove_coupon()
+        messages.success(request, f"Coupon '{coupon_code}' removed")
+        
+        # Update cart activity timestamp
+        cart.last_activity = timezone.now()
+        cart.save()
     
+    return redirect('cart')
+
+def cart(request):
+    cart = get_or_create_cart(request)
+    cart_items = cart.cart_items.filter(is_active=True).select_related('product').prefetch_related('variations')
+    
+    # Track cart abandonment time
+    if not request.user.is_authenticated:
+        abandonment_threshold = timezone.now() - timedelta(minutes=30)
+        if cart.last_activity < abandonment_threshold:
+            cart.log_abandonment()
+    
+    context = {
+        'cart': cart,
+        'cart_items': cart_items,
+        'total': cart.total,
+        'shipping_cost': cart.shipping_cost,
+        'tax': cart.tax,
+        'discount': cart.discount,
+        'grand_total': cart.grand_total,
+        'coupon_form': CouponForm(),
+        'abandoned': cart.status == 'abandoned'
+    }
+    return render(request, 'store/cart.html', context)
+
+@customer_required
+def checkout(request):
+    cart = get_or_create_cart(request)
+    cart_items = cart.cart_items.filter(is_active=True).select_related('product').prefetch_related('variations')
+    
+    if not cart_items.exists():
+        messages.warning(request, "Your cart is empty")
+        return redirect('store')
+    
+    # Validate stock before checkout
+    for item in cart_items:
+        combination = item.get_variation_combination()
+        stock = combination.stock if combination else item.product.stock
+        if stock < item.quantity:
+            messages.error(request, 
+                f"Only {stock} available for {item.product.product_name}"
+            )
+            return redirect('cart')
+    
+    # Calculate shipping costs
+    cart.calculate_shipping()
+    cart.save()
+    
+    context = {
+        'cart': cart,
+        'cart_items': cart_items,
+        'total': cart.total,
+        'shipping_cost': cart.shipping_cost,
+        'tax': cart.tax,
+        'discount': cart.discount,
+        'grand_total': cart.grand_total,
+    }
+    return render(request, 'store/checkout.html', context)
+
+class CouponForm(forms.Form):
+    code = forms.CharField(
+        widget=forms.TextInput(attrs={
+            'class': 'form-control',
+            'placeholder': 'Enter coupon code'
+        }),
+        max_length=50,
+        required=False
+    )

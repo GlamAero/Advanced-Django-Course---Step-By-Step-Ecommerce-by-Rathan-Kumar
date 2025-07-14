@@ -1,0 +1,27 @@
+<h3>Product: {{ product.product_name }}</h3>
+<p>You’ve successfully generated {{ combos|length }} variation combinations.</p>
+<table border="1" cellpadding="6" cellspacing="0">
+  <thead>
+    <tr>
+      <th>#</th>
+      <th>Options</th>
+      <th>Price</th>
+      <th>Stock</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for combo in combos %}
+    <tr>
+      <td>{{ forloop.counter }}</td>
+      <td>
+        {% for v in combo.variations.all %}
+          {{ v.variation_category }}: {{ v.variation_value }}{% if not forloop.last %}, {% endif %}
+        {% endfor %}
+      </td>
+      <td>{{ combo.price|default:"—" }}</td>
+      <td>{{ combo.stock }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+<p>Thanks for selling with us!</p>

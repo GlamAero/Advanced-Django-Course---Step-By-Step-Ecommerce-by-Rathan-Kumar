@@ -1,0 +1,131 @@
+{% extends 'base.html' %}
+{% load widget_tweaks %}
+{% load socialaccount %}
+
+{% block title %}Vendor Login{% endblock %}
+
+{% block content %}
+
+    {% if request.user.is_authenticated %}
+
+        <section class="access-denied">
+            <p>You are already logged in as {{ request.user.get_first_name }}.</p>
+            <a href="{% url 'accounts:vendor_dashboard' %}" class="btn btn-primary">
+                Go to Dashboard
+            </a>
+        </section>
+
+    {% else%}
+
+    <section class="section-content py-4" style="min-height: 84vh;">
+        <div class="card mx-auto shadow-sm" style="max-width: 380px; margin-top: 100px;">
+            <div class="card-body">
+                <h4 class="card-title mb-4 text-center">Vendor Sign In</h4>
+
+                {% include 'includes/alerts.html' %}
+                <br>
+
+                <form id="vendorLoginForm" method="POST" action="" novalidate aria-label="Vendor login form">
+                    {% csrf_token %}
+
+                    {% if form.non_field_errors %}
+                        <div class="alert alert-danger" role="alert">
+                            {{ form.non_field_errors }}
+                        </div>
+                    {% endif %}
+
+                    <div class="mb-3">
+                        {{ form.email.label_tag }}
+                        {{ form.email|add_class:"form-control" }}
+                        {% if form.email.errors %}
+                            <div class="invalid-feedback d-block">
+                                {{ form.email.errors }}
+                            </div>
+                        {% endif %}
+                    </div>
+
+                    <div class="mb-3">
+                        {{ form.password.label_tag }}
+                        {{ form.password|add_class:"form-control" }}
+                        {% if form.password.errors %}
+                            <div class="invalid-feedback d-block">
+                                {{ form.password.errors }}
+                            </div>
+                        {% endif %}
+                    </div>
+
+                    <div class="mb-3">
+                        {{ form.captcha.label_tag }}
+                        {{ form.captcha|add_class:"form-control" }}
+                        {% if form.captcha.errors %}
+                            <div class="invalid-feedback d-block">
+                                {{ form.captcha.errors }}
+                            </div>
+                        {% endif %}
+                    </div>
+
+                    <div class="mb-3 text-end">
+                        <a href="{% url 'accounts:forgot_password' %}" class="text-decoration-none" aria-label="Forgot password link">
+                            Forgot password?
+                        </a>
+                    </div>
+
+                    <div class="mb-4">
+                        <button type="submit" class="btn btn-primary w-100" aria-label="Login as vendor" id="loginButton" disabled>
+                            Login
+                        </button>
+                    </div>
+                </form>
+
+                <!-- Social login options -->
+                <div class="text-center mt-3">
+                    <p>Or login with:</p>
+                    <a href="{% provider_login_url 'google' process='login' %}" class="btn btn-outline-dark w-100 mb-2" role="button" aria-label="Login with Google">
+                        <i class="fab fa-google me-2"></i> Google
+                    </a>
+                    <a href="{% provider_login_url 'facebook' process='login' %}" class="btn btn-outline-primary w-100" role="button" aria-label="Login with Facebook">
+                        <i class="fab fa-facebook-f me-2"></i> Facebook
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <p class="text-center mt-4">
+            Not registered yet? 
+            <a href="{% url 'accounts:register' %}?role=vendor" class="text-decoration-none" aria-label="Sign up as Vendor link">
+                Register as Vendor
+            </a>
+            <a href="{% url 'accounts:register' %}?role=customer" class="text-decoration-none" aria-label="Sign up as Customer link">
+                Sign up as Customer
+            </a>
+        </p>
+    </section>
+{% endblock %}
+
+{% block extra_js %}
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const form = document.getElementById('vendorLoginForm');
+            const loginButton = document.getElementById('loginButton');
+            const requiredFields = ['id_email', 'id_password', 'id_captcha_1']; // Adjust if captcha field id differs
+
+            function checkInputs() {
+                const allFilled = requiredFields.every(id => {
+                    const el = document.getElementById(id);
+                    return el && el.value.trim() !== '';
+                });
+                loginButton.disabled = !allFilled;
+            }
+
+            requiredFields.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) {
+                    el.addEventListener('input', checkInputs);
+                }
+            });
+
+            // Initial check on page load
+            checkInputs();
+        });
+    </script>
+{% endblock %}

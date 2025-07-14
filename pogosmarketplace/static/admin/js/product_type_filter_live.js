@@ -2,44 +2,41 @@ document.addEventListener('DOMContentLoaded', function () {
     const typeSelect = document.getElementById('id_product_type');
     const productSelect = document.getElementById('id_product');
     const priceRow = document.querySelector('.form-row.field-price');
+    const stockRow = document.querySelector('.form-row.field-stock');
 
     if (!typeSelect || !productSelect) return;
 
-    // Store all original product options
-    const allOptions = Array.from(productSelect.options);
+    const allOptions = Array.from(productSelect.options).map(option => option.cloneNode(true));
 
-    function filterProductsAndTogglePrice() {
+    function filterProducts() {
         const selectedType = typeSelect.value;
-
-        // Filter the product dropdown
         productSelect.innerHTML = '';
 
-        const filtered = allOptions.filter(option => {
-            if (!option.value) return true; // Keep placeholder
-            const label = option.textContent.toLowerCase();
-            return selectedType === '' ||
-                   (selectedType === 'variation' && label.includes('[variation]')) ||
-                   (selectedType === 'combination' && label.includes('[combination]'));
+        allOptions.forEach(option => {
+            const type = option.getAttribute('data-product-type');
+            const include =
+                !option.value || selectedType === '' || type === selectedType;
+
+            if (include) {
+                productSelect.appendChild(option.cloneNode(true));
+            }
         });
 
-        filtered.forEach(option => productSelect.appendChild(option.cloneNode(true)));
-
-        // Automatically hide price field if 'combination' is selected
-        if (priceRow) {
-            priceRow.style.display = selectedType === 'combination' ? 'none' : 'block';
-        }
+        toggleFieldVisibility();
     }
 
-    // React when product_type changes
-    typeSelect.addEventListener('change', filterProductsAndTogglePrice);
-
-    // Also listen when a product is selected — optional fallback
-    productSelect.addEventListener('change', () => {
+    function toggleFieldVisibility() {
         const selectedOption = productSelect.options[productSelect.selectedIndex];
-        const label = selectedOption?.textContent?.toLowerCase();
-        const isCombination = label && label.includes('[combination]');
-        if (priceRow) priceRow.style.display = isCombination ? 'none' : 'block';
-    });
+        const type = selectedOption?.getAttribute('data-product-type') || typeSelect.value;
 
-    filterProductsAndTogglePrice(); // Initial run
+        const isCombination = type === 'combination';
+
+        if (priceRow) priceRow.style.display = isCombination ? 'none' : 'block';
+        if (stockRow) stockRow.style.display = isCombination ? 'none' : 'block';
+    }
+
+    typeSelect.addEventListener('change', filterProducts);
+    productSelect.addEventListener('change', toggleFieldVisibility);
+
+    filterProducts(); // Run once on load
 });

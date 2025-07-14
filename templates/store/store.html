@@ -1,0 +1,236 @@
+{% extends 'base.html' %}
+
+{% load static %}
+
+	{% block content %}
+
+        <!-- ========================= SECTION PAGETOP ========================= -->
+        <section class="section-pagetop bg">
+            <div class="container">
+
+                <!--'request.path' is a Django attribute that returns the URL path of the current request, excluding the domain. e.g in 'https://example.com/store/search/ball', 'store/search/ball' is the 'request.path' -->
+                {% if 'search' in request.path %}
+                    <h2 class="title-page">Search Results</h2>   
+                {% else %}
+                    <h2 class="title-page">Our Store</h2>
+                {% endif %}
+
+            </div> <!-- container //  -->
+
+            <section class="section-content padding-y">
+                <div class="container">
+
+                    <div class="row">
+                        <aside class="col-md-3">
+                            
+                        <div class="card">
+                            <article class="filter-group">
+                                <header class="card-header">
+                                    <a href="#" data-toggle="collapse" data-target="#collapse_1" aria-expanded="true" class="">
+                                        <i class="icon-control fa fa-chevron-down"></i>
+                                        <h6 class="title">Categories</h6>
+                                    </a>
+                                </header>
+                                <div class="filter-content collapse show" id="collapse_1" style="">
+                                    <div class="card-body">
+                                        
+                                        <ul class="list-menu">
+
+                                            <li>
+                                                    <!--'url 'store'' means to go to the url with name 'store' and render its view-->
+                                                    <a href="{% url 'store' %}">All Products</a>
+                                                </li>
+
+
+                                            <!--'links' below is found in 'context_processors' which is a file in the category app. 'links' contains all the categories of products being sold.-->
+                                            {% for category in links %}
+                                                <li>
+                                                    <!-- 'get_url' is a method in the models.py file of the category app. It returns the url of the named category. -->
+                                                    <a href="{{ category.get_url }}">{{ category.category_name }}</a>
+                                                </li>
+                                            {% endfor %}
+
+                                        </ul>
+
+                                    </div> <!-- card-body.// -->
+                                </div>
+                            </article> <!-- filter-group  .// -->
+                            <article class="filter-group">
+                                <header class="card-header">
+                                    <a href="#" data-toggle="collapse" data-target="#collapse_4" aria-expanded="true" class="">
+                                        <i class="icon-control fa fa-chevron-down"></i>
+                                        <h6 class="title">Sizes </h6>
+                                    </a>
+                                </header>
+                                <div class="filter-content collapse show" id="collapse_4" style="">
+                                    <div class="card-body">
+                                        <label class="checkbox-btn">
+                                            <input type="checkbox">
+                                            <span class="btn btn-light"> XS </span>
+                                        </label>
+
+                                        <label class="checkbox-btn">
+                                            <input type="checkbox">
+                                            <span class="btn btn-light"> SM </span>
+                                        </label>
+
+                                        <label class="checkbox-btn">
+                                            <input type="checkbox">
+                                            <span class="btn btn-light"> LG </span>
+                                        </label>
+
+                                        <label class="checkbox-btn">
+                                            <input type="checkbox">
+                                            <span class="btn btn-light"> XXL </span>
+                                        </label>
+                                </div><!-- card-body.// -->
+                                </div>
+                            </article> <!-- filter-group .// -->
+                            
+                            <article class="filter-group">
+                                <header class="card-header">
+                                    <a href="#" data-toggle="collapse" data-target="#collapse_3" aria-expanded="true" class="">
+                                        <i class="icon-control fa fa-chevron-down"></i>
+                                        <h6 class="title">Price range </h6>
+                                    </a>
+                                </header>
+                                <div class="filter-content collapse show" id="collapse_3" style="">
+                                    <div class="card-body">
+                                        
+                                        <div class="form-row">
+                                        <div class="form-group col-md-6">
+                                            <label>Min</label>
+                                            <!-- <input class="form-control" placeholder="$0" type="number"> -->
+                                                <select class="mr-2 form-control">
+                                                    <option value="0">$0</option>
+                                                    <option value="50">$50</option>
+                                                    <option value="100">$100</option>
+                                                    <option value="150">$150</option>
+                                                    <option value="200">$200</option>
+                                                    <option value="500">$500</option>
+                                                    <option value="1000">$1000</option>
+                                                </select>
+                                            </div>
+                                            <div class="form-group text-right col-md-6">
+                                            <label>Max</label>
+                                                <select class="mr-2 form-control">
+                                                    <option value="50">$50</option>
+                                                    <option value="100">$100</option>
+                                                    <option value="150">$150</option>
+                                                    <option value="200">$200</option>
+                                                    <option value="500">$500</option>
+                                                    <option value="1000">$1000</option>
+                                                    <option value="2000">$2000+</option>
+                                            </select>
+                                        </div>
+                                        </div> <!-- form-row.// -->
+                                        <button class="btn btn-block btn-primary">Apply</button>
+                                    </div><!-- card-body.// -->
+                                </div>
+                            </article> <!-- filter-group .// -->
+                            
+                        </div> <!-- card.// -->
+
+                        </aside> <!-- col.// -->
+                        <main class="col-md-9">
+
+                            <header class="border-bottom mb-4 pb-3">
+                                    <div class="form-inline">
+                                        <span class="mr-md-auto"> <b>{{ product_count }} items found<b></span>
+                                        
+                                    </div>
+                            </header><!-- sect-heading -->
+
+                            <div class="row">
+
+                                {% if products %}
+
+                                    {% for product in products %}
+
+                                        <div class="col-md-4">
+                                            <figure class="card card-product-grid">
+                                                <div class="img-wrap"> 
+                                                    
+                                                    <!-- 'get_url' is a method in the models.py file of the store app. It returns the url of the named product. It returns the 'product_detail' function as in 'store/models' -->
+                                                    <a href="{{ product.get_url }}" class="img-wrap"> 
+                                                        
+                                                        <img src="{{ product.images.url }}" alt="">
+
+                                                    </a>
+                                                    
+                                                </div> <!-- img-wrap.// -->
+                                                <figcaption class="info-wrap">
+                                                    <div class="fix-height">
+
+                                                        <!-- 'get_url' is a method in the models.py file of the store app. It returns the url of the named product. It returns the 'product_detail' function as in 'store/models'-->
+                                                        <a href="{{ product.get_url }}" class="title">{{ product.product_name }}</a>
+                                                        <div class="price-wrap mt-2">
+                                                            <span class="price">${{ product.price }}</span>
+                                                        </div> <!-- price-wrap.// -->
+                                                    </div>
+
+                                                    <!-- 'get_url' is a method in the models.py file of the store app. It returns the url of the named product. It returns the 'product_detail' function as in 'store/models' -->
+                                                    <a href="{{ product.get_absolute_url }}" class="btn btn-block btn-primary">View Details</a>
+                                                </figcaption>
+                                            </figure>
+                                        </div> <!-- col.// -->
+                                    
+                                    {% endfor %}
+
+                                {% else %}
+
+                                    <div class="col-md-12">
+                                        <h4>No result found. Please try again...</h4>
+                                    </div>
+
+                                {% endif %}
+
+                            </div> <!-- row end.// -->
+
+
+                            <nav class="mt-4" aria-label="Page navigation sample">
+
+                                <!--PAGINATION-->
+                                {% if products.has_other_pages %}
+                                    <ul class="pagination">
+
+                                        {% if products.has_previous %}
+                                            <li class="page-item"><a class="page-link" href="?page={{ products.previous_page_number }}">Previous</a></li>
+                                        {% else %}
+                                            <li class="page-item disabled"><a class="page-link" href="">Previous</a></li>
+                                        {% endif %}
+
+                                        <!--'paginator.page_range' - retrieves a list of page numbers (e.g., [1, 2, 3, 4]).-->
+                                        {% for i in products.paginator.page_range %}
+
+                                            <!--'products.number' is the current page number-->
+                                            {% if products.number == i %}
+                                                <li class="page-item active"><a class="page-link" href="">{{ i }}</a></li>
+                                            {% else %}
+                                                <li class="page-item"><a class="page-link" href="?page={{ i }}">{{ i }}</a></li>
+                                            {% endif %}
+                                            
+                                        {% endfor %}
+                                        
+                                        {% if products.has_next %}
+                                            <li class="page-item"><a class="page-link" href="?page={{ products.next_page_number }}">Next</a></li>
+                                        {% else %}
+                                            <li class="page-item disabled"><a class="page-link" href="">Next</a></li>
+                                        {% endif %}
+                                    </ul>
+                                {% endif %}
+                            </nav>
+
+	                    </main> <!-- col.// -->
+
+                    </div>
+
+                </div> <!-- container .//  -->
+
+            </section>
+<!-- ========================= SECTION CONTENT END// ========================= -->
+
+        </section>
+        <!-- ========================= SECTION INTRO END// ========================= -->
+
+    {% endblock %}

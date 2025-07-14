@@ -1,0 +1,131 @@
+{% extends 'base.html' %}
+{% load static %}
+{% block title %}My Account - Dashboard{% endblock %}
+
+{% block content %}
+
+    {% if not request.user.is_authenticated or not request.user.is_customer %}
+        <div class="customer-login-prompt">
+            <p>Customer account required to access this page</p>
+            <a href="{% url 'login' %}?next={{ request.path }}&type=customer" class="btn btn-primary">
+            Login
+            </a>
+        </div>
+    {% else %}
+        <section class="section-content padding-y bg">
+            <div class="container">
+                <div class="row">
+                    <!-- Sidebar -->
+                    <aside class="col-md-3 mb-4">
+                        <div class="list-group shadow-sm">
+                            <a href="{% url 'accounts:customer_dashboard' %}" class="list-group-item list-group-item-action active">
+                                Dashboard
+                            </a>
+                            <a href="{% url 'orders:customer_orders' %}" class="list-group-item list-group-item-action">
+                                Order History
+                            </a>
+                            <a href="{% url 'accounts:transactions' %}" class="list-group-item list-group-item-action">
+                                Transactions
+                            </a>
+                            <a href="{% url 'returns:manage' %}" class="list-group-item list-group-item-action">
+                                Returns & Refunds
+                            </a>
+                            <a href="{% url 'accounts:edit_profile' %}" class="list-group-item list-group-item-action">
+                                Account Settings
+                            </a>
+                            <a href="{% url 'accounts:manage_addresses' %}" class="list-group-item list-group-item-action">
+                                Addresses
+                            </a>
+                            <a href="{% url 'accounts:customer_wishlist' %}" class="list-group-item list-group-item-action">
+                                Wishlist
+                            </a>
+                            <a href="{% url 'support:customer_tickets' %}" class="list-group-item list-group-item-action">
+                                Support
+                            </a>
+                            <a href="{% url 'accounts:logout' %}" class="list-group-item list-group-item-action text-danger">
+                                <i class="fa fa-power-off me-1"></i> Logout
+                            </a>
+                        </div>
+                    </aside>
+
+                    <!-- Main Content -->
+                    <main class="col-md-9">
+                        <div class="card shadow-sm">
+                            <div class="card-body">
+                                <h4 class="mb-4">Welcome, {{ request.user.first_name|default:request.user.email }}</h4>
+
+                                <!-- Quick Stats -->
+                                <div class="row text-center mb-4">
+                                    <div class="col-md-4">
+                                        <div class="border rounded py-3">
+                                            <h6 class="text-muted">Total Orders</h6>
+                                            <h3 class="fw-bold text-primary">{{ total_orders }}</h3>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <div class="border rounded py-3">
+                                            <h6 class="text-muted">Pending Deliveries</h6>
+                                            <h3 class="fw-bold text-warning">{{ pending_orders }}</h3>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <div class="border rounded py-3">
+                                            <h6 class="text-muted">Wishlist</h6>
+                                            <h3 class="fw-bold text-success">{{ wishlist_count }}</h3>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <hr>
+
+                                <!-- Recent Orders -->
+                                <h5 class="mb-3">Recent Orders</h5>
+                                {% if recent_orders %}
+                                    <div class="table-responsive">
+                                        <table class="table table-hover align-middle">
+                                            <thead class="table-light">
+                                                <tr>
+                                                    <th scope="col">Order ID</th>
+                                                    <th scope="col">Date</th>
+                                                    <th scope="col">Status</th>
+                                                    <th scope="col">Total</th>
+                                                    <th scope="col">Actions</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {% for order in recent_orders %}
+                                                <tr>
+                                                    <td>{{ order.order_number }}</td>
+                                                    <td>{{ order.created_at|date:"M d, Y" }}</td>
+                                                    <td>
+                                                        <span class="badge bg-{{ order.status|lower }}">
+                                                            {{ order.status }}
+                                                        </span>
+                                                    </td>
+                                                    <td>${{ order.order_total }}</td>
+                                                    <td>
+                                                        <a href="{% url 'orders:order_detail' order.order_number %}" class="btn btn-sm btn-outline-primary">
+                                                            View
+                                                        </a>
+                                                        {% if order.status == "Shipped" or order.status == "Out for Delivery" %}
+                                                            <a href="{% url 'orders:track' order.order_number %}" class="btn btn-sm btn-light">
+                                                                Track
+                                                            </a>
+                                                        {% endif %}
+                                                    </td>
+                                                </tr>
+                                                {% endfor %}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                {% else %}
+                                    <p class="text-muted">You haven’t placed any orders yet.</p>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </main>
+                </div>
+            </div>
+        </section>
+    {% endif %}
+{% endblock %}

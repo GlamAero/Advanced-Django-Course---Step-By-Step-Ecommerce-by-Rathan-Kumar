@@ -1,0 +1,161 @@
+{% extends 'base.html' %}
+{% load widget_tweaks %}
+{% load socialaccount %}
+{% load static %}
+{% load i18n %}
+{% load crispy_forms_tags %}
+
+
+{% block title %}Customer Login{% endblock %}
+
+
+{% block content %}
+
+  {% if request.user.is_authenticated %}
+
+    <section class="access-denied">
+        <p>You are already logged in as {{ request.user.get_full_name }}.</p>
+        <a href="{% url 'accounts:customer_dashboard' %}" class="btn btn-primary">
+            Go to Dashboard
+        </a>
+    </section>
+
+  {% else%}
+
+    <section class="section-content py-4" style="min-height: 84vh;">
+        <div class="card mx-auto shadow-sm" style="max-width: 400px; margin-top: 20px;">
+            <div class="card-body">
+                <h4 class="card-title mb-4 text-center">Customer Sign In</h4>
+
+                {% include 'includes/alerts.html' %}
+
+                <form method="POST" novalidate aria-label="Customer login form">
+                    {% csrf_token %}
+
+                    {% if form.non_field_errors %}
+                        <div class="alert alert-danger" role="alert">
+                            {{ form.non_field_errors }}
+                        </div>
+                    {% endif %}
+
+                    <div class="mb-3">
+                        {{ form.email.label_tag }}
+                        {{ form.email|add_class:"form-control" }}
+                        {% if form.email.errors %}
+                            <div class="invalid-feedback d-block">
+                                {{ form.email.errors }}
+                            </div>
+                        {% endif %}
+                    </div>
+
+                    <div class="mb-3">
+                        {{ form.password.label_tag }}
+                        {{ form.password|add_class:"form-control" }}
+                        {% if form.password.errors %}
+                            <div class="invalid-feedback d-block">
+                                {{ form.password.errors }}
+                            </div>
+                        {% endif %}
+                    </div>
+
+                    <div class="mb-3">
+                        {{ form.captcha.label_tag }}
+                        {{ form.captcha|add_class:"form-control" }}
+                        {% if form.captcha.errors %}
+                            <div class="invalid-feedback d-block">
+                                {{ form.captcha.errors }}
+                            </div>
+                        {% endif %}
+                    </div>
+
+                    <div class="mb-3 text-end">
+                        <a href="{% url 'accounts:forgot_password' %}" class="text-decoration-none" aria-label="Forgot password link">
+                            Forgot password?
+                        </a>
+                    </div>
+
+                    <div class="mb-4">
+                        <button type="submit" class="btn btn-primary w-100" aria-label="Login as customer">
+                            Login
+                        </button>
+                    </div>
+                </form>
+
+                <hr>
+
+                <div class="text-center">
+                    <p class="mb-3">Or login with:</p>
+                    <div class="d-flex justify-content-center gap-3">
+                        <a href="{% provider_login_url 'google' process='login' %}" 
+                          class="btn btn-outline-danger flex-fill me-2" 
+                          style="max-width: 130px;" 
+                          role="button" 
+                          aria-label="Login with Google">
+                            <i class="fab fa-google me-2"></i> Google
+                        </a>
+                        <a href="{% provider_login_url 'facebook' process='login' %}" 
+                          class="btn btn-outline-primary flex-fill ms-2" 
+                          style="max-width: 130px;" 
+                          role="button" 
+                          aria-label="Login with Facebook">
+                            <i class="fab fa-facebook-f me-2"></i> Facebook
+                        </a>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </section>
+
+    <!-- Registration Prompt Modal -->
+    <div class="modal fade" id="registerPromptModal" tabindex="-1" aria-labelledby="registerPromptLabel" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+          <div class="modal-body text-center">
+            <p>
+              Not registered yet? 
+              <a href="{% url 'accounts:register' %}?role=customer" class="text-decoration-none" aria-label="Sign up as Customer link">
+                Sign up
+              </a>
+            </p>
+            <p>
+              Want to start selling? 
+              <a href="{% url 'accounts:register' %}?role=vendor" class="text-decoration-none" aria-label="Sign up as Vendor link">
+                Register as a vendor
+              </a>
+            </p>
+          </div>
+          <div class="modal-footer justify-content-center">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" aria-label="Close popup">Close</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  {% endif %}
+
+{% endblock %}
+
+{% block extra_scripts %}
+  {% if not request.user.is_authenticated %}
+    <script>
+      document.addEventListener('DOMContentLoaded', function () {
+        const modalKey = 'registerPromptShown';
+        const hasSeenModal = localStorage.getItem(modalKey);
+        
+        if (!hasSeenModal) {
+          const modalEl = document.getElementById('registerPromptModal');
+          if (modalEl) {
+            const modal = new bootstrap.Modal(modalEl);
+            setTimeout(function () {
+              modal.show();
+              localStorage.setItem(modalKey, 'true');
+              setTimeout(function () {
+                modal.hide();
+              }, 8000);
+            }, 3000);
+          }
+        }
+      });
+    </script>
+  {% endif %}
+{% endblock %}

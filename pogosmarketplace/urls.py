@@ -1,30 +1,56 @@
-"""
-URL configuration for pogosmarketplace project.
-
-The `urlpatterns` list routes URLs to views. For more information please see:
-    https://docs.djangoproject.com/en/5.2/topics/http/urls/
-Examples:
-Function views
-    1. Add an import:  from my_app import views
-    2. Add a URL to urlpatterns:  path('', views.home, name='home')
-Class-based views
-    1. Add an import:  from other_app.views import Home
-    2. Add a URL to urlpatterns:  path('', Home.as_view(), name='home')
-Including another URLconf
-    1. Import the include() function: from django.urls import include, path
-    2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
-"""
 from django.contrib import admin
 from django.urls import path, include
-from . import views
+from django.conf import settings
 from django.conf.urls.static import static
-from django.conf import settings  
+from django.views.generic import TemplateView
+from accounts import views as accounts_views
+from .views import home
+
+# Custom error handlers
+handler400 = 'accounts.views.bad_request_view'
+handler403 = 'accounts.views.permission_denied_view'
+handler404 = 'accounts.views.page_not_found_view'
+handler500 = 'accounts.views.server_error_view'
 
 urlpatterns = [
+    # Admin
     path('admin/', admin.site.urls),
-    path('', views.home, name='home'),
+    
+    # Home
+    path('', home, name='home'),
+    
+    # Apps
+    path('accounts/', include('accounts.urls')),
     path('store/', include('store.urls')),
     path('cart/', include('carts.urls')),
-    path('accounts/', include('accounts.urls')),
     path('orders/', include('orders.urls')),
-] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+    path('wishlist/', include('wishlist.urls')),
+    
+    # Auth
+    path('accounts/login/', accounts_views.login_redirect, name='login'),
+    path('accounts/', include('allauth.urls')),
+    
+    # Security
+    path('captcha/', include('captcha.urls')),
+    
+    # Legal
+    path('terms/', TemplateView.as_view(template_name='legal/terms.html'), name='terms'),
+    path('privacy/', TemplateView.as_view(template_name='legal/privacy.html'), name='privacy'),
+
+    path('api/accounts/', include('accounts.urls_api')),
+
+]
+
+# Media files in development
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+    
+# Debug toolbar
+if settings.DEBUG and 'debug_toolbar' in settings.INSTALLED_APPS:
+    import debug_toolbar
+    urlpatterns = [
+        path('__debug__/', include(debug_toolbar.urls)),
+    ] + urlpatterns
+
+
+

@@ -1,0 +1,162 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block content %}
+<div class="container my-5">
+    <div class="row">
+        <div class="col-md-12">
+            <h1 class="mb-4">Your Wishlist</h1>
+            
+            {% if items %}
+            <div class="table-responsive">
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            <th>Product</th>
+                            <th>Price</th>
+                            <th>Stock</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in items %}
+                        <tr>
+                            <td>
+                                <div class="d-flex align-items-center">
+                                    <img src="{{ item.product.images.first.image.url }}" 
+                                         alt="{{ item.product.product_name }}" 
+                                         class="img-thumbnail mr-3" 
+                                         style="width: 80px; height: 80px; object-fit: cover;">
+                                    <div>
+                                        <a href="{{ item.product.get_url }}">
+                                            <h5 class="mb-1">{{ item.product.product_name }}</h5>
+                                        </a>
+                                        <p class="text-muted mb-0">SKU: {{ item.product.sku }}</p>
+                                    </div>
+                                </div>
+                            </td>
+                            <td>
+                                {% if item.product.discounted_price %}
+                                <span class="text-danger">${{ item.product.discounted_price }}</span>
+                                <del class="text-muted">${{ item.product.price }}</del>
+                                {% else %}
+                                ${{ item.product.price }}
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if item.product.stock > 0 %}
+                                <span class="badge badge-success">In Stock</span>
+                                {% else %}
+                                <span class="badge badge-danger">Out of Stock</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <button class="btn btn-primary btn-sm move-to-cart" 
+                                        data-product-id="{{ item.product.id }}">
+                                    <i class="fas fa-shopping-cart"></i> Add to Cart
+                                </button>
+                                <button class="btn btn-danger btn-sm remove-from-wishlist" 
+                                        data-product-id="{{ item.product.id }}">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="text-center py-5">
+                <i class="fas fa-heart fa-5x text-muted mb-4"></i>
+                <h3>Your wishlist is empty</h3>
+                <p class="text-muted">Start adding items you love!</p>
+                <a href="{% url 'store' %}" class="btn btn-primary mt-3">
+                    Continue Shopping
+                </a>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+$(document).ready(function() {
+    // Add to wishlist
+    $('.add-to-wishlist').click(function() {
+        const productId = $(this).data('product-id');
+        $.ajax({
+            url: "{% url 'wishlist:add_to_wishlist' %}",
+            type: 'POST',
+            data: {
+                'product_id': productId,
+                'csrfmiddlewaretoken': '{{ csrf_token }}'
+            },
+            success: function(response) {
+                if(response.success) {
+                    showToast('Added to wishlist!', 'success');
+                    $('#wishlist-count').text(response.wishlist_count);
+                } else {
+                    showToast(response.message, 'error');
+                }
+            }
+        });
+    });
+    
+    // Remove from wishlist
+    $('.remove-from-wishlist').click(function() {
+        const productId = $(this).data('product-id');
+        $.ajax({
+            url: "{% url 'wishlist:remove_from_wishlist' %}",
+            type: 'POST',
+            data: {
+                'product_id': productId,
+                'csrfmiddlewaretoken': '{{ csrf_token }}'
+            },
+            success: function(response) {
+                if(response.success) {
+                    showToast('Removed from wishlist', 'info');
+                    $('#wishlist-count').text(response.wishlist_count);
+                    // Remove row from table
+                    $(`[data-product-id="${productId}"]`).closest('tr').fadeOut();
+                } else {
+                    showToast(response.message, 'error');
+                }
+            }
+        });
+    });
+    
+    // Move to cart
+    $('.move-to-cart').click(function() {
+        const productId = $(this).data('product-id');
+        $.ajax({
+            url: "{% url 'wishlist:move_to_cart' %}",
+            type: 'POST',
+            data: {
+                'product_id': productId,
+                'csrfmiddlewaretoken': '{{ csrf_token }}'
+            },
+            success: function(response) {
+                if(response.success) {
+                    showToast('Added to cart!', 'success');
+                    // Update cart count
+                    $('.cart-count').text(response.cart_count);
+                    // Remove from wishlist
+                    $(`[data-product-id="${productId}"]`).closest('tr').fadeOut();
+                } else {
+                    showToast(response.message, 'error');
+                }
+            }
+        });
+    });
+    
+    function showToast(message, type) {
+        // Implementation of toast notification
+        // This would depend on your notification library
+        console.log(`${type.toUpperCase()}: ${message}`);
+    }
+});
+</script>
+{% endblock %}
+

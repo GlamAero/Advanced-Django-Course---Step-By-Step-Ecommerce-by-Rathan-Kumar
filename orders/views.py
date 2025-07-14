@@ -1,328 +1,423 @@
-from django.shortcuts import render, redirect
-from django.http import HttpResponse, JsonResponse
-from carts.models import CartItem
-from .forms import OrderForm
-from .models import Order, Payment, OrderProduct
-from store.models import Product, Variation, VariationCombination
-import datetime
-from django.contrib.auth.decorators import login_required
+import uuid
+from django.http import JsonResponse
+import stripe
+import requests
+import logging
+import hmac
+import hashlib
+
 from django.conf import settings
+from django.shortcuts import render, redirect, get_object_or_404
 from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_POST, require_http_methods
+from django.contrib.admin.views.decorators import staff_member_required
+from django.contrib.auth.decorators import login_required
+from django.core.files.storage import default_storage
+from django.urls import reverse
 from django.db import transaction
-import json, requests
-from django.db.models import Count
-from decimal import Decimal
+
+from accounts.decorators import customer_required, vendor_required, customer_or_vendor_required
+from accounts.utils import log_activity
+from carts.models import CartItem
+from orders.models import Payment, OrderItem
+from store.utils.stock import deduct_product_stock, add_product_stock
 
 
+stripe.api_key = settings.STRIPE_SECRET_KEY
+logger = logging.getLogger(__name__)
 
-# Dedicated Payment View - Displays user's payments
-@login_required
-def payments(request):
-    payments = Payment.objects.filter(user=request.user).order_by("-created_at")
-    return render(request, "orders/payments.html", {"payments": payments})
-
-
-@csrf_exempt
-@login_required
-def save_payment_data(request):
-    if request.method == "POST":
-        data = json.loads(request.body)
-
-        order = Order.objects.get(user=request.user, is_ordered=False)
-        cart_items = CartItem.objects.filter(user=request.user)
-
-        # (1) Create Payment
-        payment = Payment.objects.create(
-            user=request.user,
-            paypal_order_id=data["paypal_order_id"],
-            transaction_id=data["transaction_id"],
-            payment_method=data["payment_method"],
-            amount_paid=data["amount_paid"],
-            status=data["status"],
-        )
-
-        # (2) Update Order
-        order.payment = payment
-        order.is_ordered = True
-        order.save()
-
-        # (3) Deduct stock based on product type
-        for item in cart_items:
-            product = item.product
-            quantity = item.quantity
-            variations = item.variations.all()
-            var_count = variations.count()
-
-            if var_count == 0:
-                # SINGLE PRODUCT
-                product.stock -= quantity
-                product.save()
-
-            elif var_count == 1:
-                # PRODUCT WITH ONE VARIATION
-                variation = variations.first()
-                variation.stock -= quantity
-                variation.save()
-
-                # Update total product stock from all related variations
-                total_stock = sum(v.stock for v in Variation.objects.filter(product=product))
-                product.stock = total_stock
-                product.save()
-
-            else:
-                # PRODUCT WITH VARIATION COMBINATION
-                combo = VariationCombination.objects.filter(
-                    product=product,
-                    variations__in=variations
-                ).annotate(
-                    match_count=Count("variations")
-                ).filter(
-                    match_count=var_count
-                ).first()
-
-                if combo:
-                    combo.stock -= quantity
-                    combo.save()
-
-                    # Update total product stock from all related combinations
-                    total_combo_stock = sum(c.stock for c in VariationCombination.objects.filter(product=product))
-                    product.stock = total_combo_stock
-                    product.save()
-
-        # (4) Clear cart
-        cart_items.delete()
-
-        return JsonResponse({'payment_id': payment.transaction_id, 'status': payment.status})
-
-
-# Move Cart Items To OrderProduct Table
-def move_cart_items_to_order(user, order):
-    """
-    Transfers CartItems to OrderProduct table after successful payment and ensures proper deletion.
-    """
-    cart_items = CartItem.objects.filter(user=user)
-    if cart_items.exists():
-        for item in cart_items:
-            order_product = OrderProduct.objects.create(
-                order=order,
-                user=user,
-                product=item.product,
-                quantity=item.quantity,
-                product_price=item.product.price,
-                ordered=True,
-            )
-            order_product.variations.set(item.variations.all())
-            item.is_active = False
-            item.save()
-            item.delete()
-    return True
-
-
-def place_order(request, total=Decimal('0.00'), quantity=0):
-    current_user = request.user
-    cart_items = CartItem.objects.filter(user=current_user)
-    cart_count = cart_items.count()
-
-    if cart_count <= 0:
-        return redirect('store')
-
-    grand_total = Decimal('0.00')
-    tax = Decimal('0.00')
-
-    for cart_item in cart_items:
-        total += cart_item.product.price * cart_item.quantity
-        quantity += cart_item.quantity
-
-    tax = total * Decimal('0.02')
-    grand_total = total + tax
-
-    if request.method == 'POST':
-        form = OrderForm(request.POST)
-        if form.is_valid():
-            data = Order()
-            data.user = current_user
-            data.first_name = form.cleaned_data['first_name']
-            data.last_name = form.cleaned_data['last_name']
-            data.phone = form.cleaned_data['phone']
-            data.email = form.cleaned_data['email']
-            data.address_line_1 = form.cleaned_data['address_line_1']
-            data.address_line_2 = form.cleaned_data['address_line_2']
-            data.country = form.cleaned_data['country']
-            data.state = form.cleaned_data['state']
-            data.city = form.cleaned_data['city']
-            data.order_note = form.cleaned_data['order_note']
-            data.order_total = grand_total
-            data.tax = tax
-            data.ip = request.META.get('REMOTE_ADDR')
-            data.save()
-
-            current_date = datetime.date.today().strftime("%Y%m%d")
-            order_number = current_date + str(data.id)
-            data.order_number = order_number
-            data.save()
-
-            order = Order.objects.filter(
-                user=current_user,
-                is_ordered=False,
-                order_number=data.order_number
-            ).first()
-
-            if not order:
-                return JsonResponse({"error": "Order not found in database."}, status=404)
-
-            context = {
-                'order': order,
-                'cart_items': cart_items,
-                'total': total,
-                'tax': tax,
-                'grand_total': grand_total,
-                'paypal_client_id': settings.PAYPAL_CLIENT_ID
-            }
-            return render(request, 'orders/payments.html', context)
-        else:
-            return HttpResponse("Something went wrong.")
-    else:
-        return redirect('checkout')
-
+# ======= UTILITY FUNCTIONS =======
 def get_paypal_access_token():
-    response = requests.post(
-        f"{settings.PAYPAL_API_BASE}/v1/oauth2/token",
-        headers={"Accept": "application/json"},
-        data={"grant_type": "client_credentials"},
-        auth=(settings.PAYPAL_CLIENT_ID, settings.PAYPAL_SECRET),
-    )
-    return response.json().get("access_token")
-
-@csrf_exempt
-def create_paypal_order(request):
-    current_user = request.user
+    """Retrieve PayPal access token with error handling"""
     try:
-        order = Order.objects.filter(user=current_user, is_ordered=False).latest("created_at")
-        grand_total = order.order_total
-    except Order.DoesNotExist:
-        return JsonResponse({'error': 'Order not found'}, status=404)
+        auth = (settings.PAYPAL_CLIENT_ID, settings.PAYPAL_SECRET_KEY)
+        data = {'grant_type': 'client_credentials'}
+        response = requests.post(
+            f"{settings.PAYPAL_API_BASE}/v1/oauth2/token",
+            data=data,
+            auth=auth,
+            timeout=10
+        )
+        response.raise_for_status()
+        return response.json().get('access_token')
+    except requests.RequestException as e:
+        logger.error(f"PayPal token request failed: {str(e)}")
+    except (KeyError, ValueError) as e:
+        logger.error(f"PayPal token parsing failed: {str(e)}")
+    return None
+
+def verify_flutterwave_signature(payload, signature):
+    """Verify Flutterwave webhook signature"""
+    secret = settings.FLUTTERWAVE_SECRET_HASH
+    generated_signature = hmac.new(
+        secret.encode('utf-8'),
+        payload,
+        hashlib.sha256
+    ).hexdigest()
+    return generated_signature == signature
+
+def _create_paypal_order(order, amount):
     token = get_paypal_access_token()
-    order_data = {
+    if not token:
+        return JsonResponse({"error": "Payment service unavailable"}, status=503)
+
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {token}",
+        "PayPal-Request-Id": f"ORDER-{order.order_number}"
+    }
+    
+    payload = {
         "intent": "CAPTURE",
         "purchase_units": [{
+            "reference_id": order.order_number,
             "amount": {
                 "currency_code": "USD",
-                "value": f"{grand_total:.2f}"
+                "value": str(amount)
             }
         }]
     }
-    response = requests.post(
-        f"{settings.PAYPAL_API_BASE}/v2/checkout/orders",
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {token}"
-        },
-        json=order_data
-    )
-    response_data = response.json()
-    if response.status_code == 201:
-        paypal_order_id = response_data["id"]
-        order = Order.objects.filter(user=request.user, is_ordered=False).latest("created_at")
-        order.paypal_order_id = paypal_order_id
+    
+    try:
+        response = requests.post(
+            f"{settings.PAYPAL_API_BASE}/v2/checkout/orders",
+            headers=headers,
+            json=payload,
+            timeout=15
+        )
+        response.raise_for_status()
+        order_data = response.json()
+        
+        # Store PayPal ID with order
+        order.paypal_order_id = order_data["id"]
         order.save()
-        return JsonResponse({"paypal_order_id": paypal_order_id})
-    else:
-        return JsonResponse({"error": "Failed to create PayPal order", "details": response_data}, status=400)
+        
+        return JsonResponse({
+            "id": order_data["id"],
+            "status": order_data["status"],
+            "links": order_data["links"]
+        })
+        
+    except requests.RequestException as e:
+        logger.error(f"PayPal API error: {str(e)}")
+        return JsonResponse({"error": "Payment gateway error"}, status=502)
+    except (KeyError, ValueError) as e:
+        logger.error(f"PayPal response parsing error: {str(e)}")
+        return JsonResponse({"error": "Invalid gateway response"}, status=502)
 
-@csrf_exempt
-def capture_paypal_order(request, order_id):
+def _create_stripe_intent(order, amount):
+    
+    try:
+        # Convert to cents
+        amount_cents = int(amount * 100)
+        
+        intent = stripe.PaymentIntent.create(
+            amount=amount_cents,
+            currency="usd",
+            metadata={
+                "order_id": order.id,
+                "order_number": order.order_number,
+                "user_id": order.user.id
+            },
+            description=f"Order #{order.order_number}",
+            receipt_email=order.email
+        )
+        
+        # Store Stripe ID with order
+        order.stripe_payment_intent = intent.id
+        order.save()
+        
+        return JsonResponse({"clientSecret": intent.client_secret})
+        
+    except stripe.error.StripeError as e:
+        logger.error(f"Stripe error: {str(e)}")
+        return JsonResponse({"error": str(e)}, status=400)
+    except Exception as e:
+        logger.exception(f"Stripe processing error: {str(e)}")
+        return JsonResponse({"error": "Payment processing failed"}, status=500)
+
+def _create_flutterwave_payment(order, amount):
+    """Create Flutterwave payment transaction"""
+    try:
+        # Generate unique transaction reference
+        tx_ref = f"FLW-{order.order_number}-{uuid.uuid4().hex[:8]}"
+        
+        headers = {
+            "Authorization": f"Bearer {settings.FLUTTERWAVE_SECRET_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "tx_ref": tx_ref,
+            "amount": str(amount),
+            "currency": settings.FLUTTERWAVE_CURRENCY,
+            "redirect_url": f"{settings.BASE_URL}{reverse('orders:payment_success')}?order_number={order.order_number}",
+            "payment_options": "card, mobilemoney, ussd",
+            "meta": {
+                "order_number": order.order_number,
+                "user_id": order.user.id
+            },
+            "customer": {
+                "email": order.email,
+                "name": f"{order.first_name} {order.last_name}",
+                "phone_number": order.phone
+            },
+            "customizations": {
+                "title": settings.SITE_NAME,
+                "description": f"Payment for Order #{order.order_number}",
+                "logo": settings.LOGO_URL
+            }
+        }
+        
+        response = requests.post(
+            "https://api.flutterwave.com/v3/payments",
+            headers=headers,
+            json=payload,
+            timeout=15
+        )
+        response.raise_for_status()
+        response_data = response.json()
+        
+        if response_data.get("status") == "success":
+            # Store Flutterwave reference with order
+            order.flutterwave_tx_ref = tx_ref
+            order.save()
+            
+            return JsonResponse({
+                "payment_link": response_data["data"]["link"],
+                "tx_ref": tx_ref
+            })
+        else:
+            logger.error(f"Flutterwave payment error: {response_data.get('message')}")
+            return JsonResponse({"error": "Payment gateway error"}, status=502)
+            
+    except requests.RequestException as e:
+        logger.error(f"Flutterwave API error: {str(e)}")
+        return JsonResponse({"error": "Payment gateway connection failed"}, status=502)
+    except (KeyError, ValueError) as e:
+        logger.error(f"Flutterwave response parsing error: {str(e)}")
+        return JsonResponse({"error": "Invalid gateway response"}, status=502)
+    except Exception as e:
+        logger.exception(f"Flutterwave processing error: {str(e)}")
+        return JsonResponse({"error": "Payment processing failed"}, status=500)
+
+def _create_offline_payment(order, method):
+    try:
+        with transaction.atomic():
+            # Update existing payment record
+            payment = Payment.objects.get(order=order)
+            payment.payment_method = method
+            payment.status = 'PENDING'
+            payment.save()
+            
+            order.status = "Pending Payment" if method == "bank_transfer" else "COD Pending"
+            order.save()
+            
+        return JsonResponse({
+            "message": "Payment recorded. Awaiting confirmation",
+            "payment_id": payment.id
+        })
+        
+    except Payment.DoesNotExist:
+        logger.error(f"No payment record found for order {order.id}")
+        return JsonResponse({"error": "Order payment record missing"}, status=400)
+
+def _capture_paypal(order, order_id, request):
     token = get_paypal_access_token()
     if not token:
-        return JsonResponse({"error": "Failed to authenticate with PayPal"}, status=500)
-    response = requests.post(
-        f"{settings.PAYPAL_API_BASE}/v2/checkout/orders/{order_id}/capture",
-        headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"}
-    )
-    response_data = response.json()
-    if response.status_code == 201:
-        captures = response_data.get("purchase_units", [{}])[0].get("payments", {}).get("captures", [])
-        if captures:
-            payment_id = captures[0].get("id", "UNKNOWN")
-            payment_status = response_data.get("status", "FAILED")
-            amount_paid = captures[0].get("amount", {}).get("value", 0)
-            order = Order.objects.filter(paypal_order_id=order_id).first()
-            if not order:
-                return JsonResponse({"error": "Order not found in the database."}, status=404)
-            with transaction.atomic():
-                order.transaction_id = payment_id
-                if payment_status == "COMPLETED":
-                    order.status = "Completed"
-                    order.is_ordered = True
-                    move_cart_items_to_order(order.user, order)
-                    order_products = OrderProduct.objects.filter(order=order)
+        return JsonResponse({"error": "Payment service unavailable"}, status=503)
+    
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {token}",
+        "PayPal-Request-Id": f"CAPTURE-{order.order_number}"
+    }
+    
+    try:
+        response = requests.post(
+            f"{settings.PAYPAL_API_BASE}/v2/checkout/orders/{order_id}/capture",
+            headers=headers,
+            json={},
+            timeout=15
+        )
+        response.raise_for_status()
+        capture_data = response.json()
+        
+        if capture_data.get("status") == "COMPLETED":
+            return _process_payment_success(order, "paypal", capture_data, request)
+        
+        logger.error(f"PayPal capture failed: {response.text}")
+        return JsonResponse({"error": "Payment capture failed"}, status=400)
+        
+    except requests.RequestException as e:
+        logger.error(f"PayPal capture API error: {str(e)}")
+        return JsonResponse({"error": "Payment gateway error"}, status=502)
 
-                    for order_product in order_products:
-                        product = order_product.product
-                        quantity = order_product.quantity
-                        variations = order_product.variations.all()
-                        var_count = variations.count()
+def _capture_stripe(order, payment_intent, request):
+    try:
+        intent = stripe.PaymentIntent.retrieve(payment_intent)
+        
+        if intent.status == "succeeded":
+            return _process_payment_success(order, "stripe", intent, request)
+        
+        logger.warning(f"Stripe payment not succeeded: {intent.status}")
+        return JsonResponse({"error": "Payment not completed"}, status=400)
+        
+    except stripe.error.StripeError as e:
+        logger.error(f"Stripe capture error: {str(e)}")
+        return JsonResponse({"error": str(e)}, status=400)
 
-                        if var_count == 0:
-                            # Single product
-                            if product.stock >= quantity:
-                                product.stock -= quantity
-                                product.save()
+@transaction.atomic
+def _process_payment_success(order, method, gateway_data, request):
+    """Finalize successful payment and complete order"""
+    try:
+        # Update payment record
+        payment = order.payment
+        payment.payment_method = method
+        payment.status = 'COMPLETED'
+        payment.amount_paid = order.order_total
+        
+        # Set transaction ID based on payment method
+        if method == "paypal":
+            payment.transaction_id = gateway_data.get('id', '')
+        elif method == "stripe":
+            payment.transaction_id = gateway_data.id
+        
+        payment.save()
+        
+        # Update order status
+        order.is_ordered = True
+        order.status = "Processing"  # Move to next fulfillment stage
+        order.save()
+        
+        # Process cart items
+        cart_items = CartItem.objects.filter(user=request.user)
+        for item in cart_items:
+            OrderItem.objects.create(
+                order=order,
+                user=request.user,
+                product=item.product,
+                quantity=item.quantity,
+                product_price=item.product.price,
+                ordered=True
+            )
+            
+            # Deduct stock and handle variations
+            variations = list(item.variations.all())
+            deduct_product_stock(item.product, item.quantity, variations)
+            item.delete()
+        
+        # Clear session cart
+        if 'cart_id' in request.session:
+            del request.session['cart_id']
+        
+        # Log activity
+        log_activity(request.user, 'order_placed', request, 
+                    details=f"Order #{order.order_number} placed")
+        
+        logger.info(f"Payment success for order #{order.order_number}")
+        return JsonResponse({
+            "success": True,
+            "redirect_url": reverse('orders:payment_success') + f"?order_number={order.order_number}"
+        })
+        
+    except Exception as e:
+        logger.exception(f"Order processing failed: {str(e)}")
+        return JsonResponse({"error": "Order fulfillment failed"}, status=500)
 
-                        elif var_count == 1:
-                            # Product with one variation
-                            variation = variations.first()
-                            if variation.stock >= quantity:
-                                variation.stock -= quantity
-                                variation.save()
+def _process_paypal_refund(refund):
+    """Process PayPal refund"""
+    try:
+        token = get_paypal_access_token()
+        if not token:
+            return {'success': False, 'message': 'PayPal authentication failed'}
+        
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {token}"
+        }
+        
+        # Calculate refund amount
+        refund_amount = refund.get_refund_amount()
+        
+        payload = {
+            "amount": {
+                "value": str(refund_amount),
+                "currency_code": "USD"
+            }
+        }
+        
+        response = requests.post(
+            f"{settings.PAYPAL_API_BASE}/v2/payments/captures/{refund.order.payment.transaction_id}/refund",
+            headers=headers,
+            json=payload
+        )
+        
+        if response.status_code in [200, 201]:
+            refund_data = response.json()
+            refund.transaction_id = refund_data.get('id')
+            refund.save()
+            return {'success': True}
+        else:
+            logger.error(f"PayPal refund failed: {response.text}")
+            return {'success': False, 'message': response.text}
+    
+    except Exception as e:
+        logger.error(f"PayPal refund error: {str(e)}")
+        return {'success': False, 'message': str(e)}
 
-                                # Update total product stock from all variations
-                                total_var_stock = sum(v.stock for v in Variation.objects.filter(product=product))
-                                product.stock = total_var_stock
-                                product.save()
+def _process_stripe_refund(refund):
+    """Process Stripe refund"""
+    try:
+        # Calculate refund amount in cents
+        refund_amount = int(refund.get_refund_amount() * 100)
+        
+        # Create refund
+        stripe_refund = stripe.Refund.create(
+            payment_intent=refund.order.stripe_payment_intent,
+            amount=refund_amount
+        )
+        
+        refund.transaction_id = stripe_refund.id
+        refund.save()
+        return {'success': True}
+    
+    except stripe.error.StripeError as e:
+        logger.error(f"Stripe refund error: {str(e)}")
+        return {'success': False, 'message': str(e)}
 
-                        else:
-                            # Product with variation combination
-                            combo = VariationCombination.objects.filter(
-                                product=product,
-                                variations__in=variations
-                            ).annotate(match=Count('variations')).filter(match=var_count).first()
+def _process_flutterwave_refund(refund):
+    """Process Flutterwave refund"""
+    try:
+        headers = {
+            "Authorization": f"Bearer {settings.FLUTTERWAVE_SECRET_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        # Calculate refund amount
+        refund_amount = refund.get_refund_amount()
+        
+        payload = {
+            "amount": refund_amount,
+            "comment": f"Refund for order {refund.order.order_number}"
+        }
+        
+        response = requests.post(
+            f"https://api.flutterwave.com/v3/transactions/{refund.order.payment.transaction_id}/refund",
+            headers=headers,
+            json=payload
+        )
+        
+        if response.status_code == 200:
+            refund_data = response.json()
+            refund.transaction_id = refund_data['data']['id']
+            refund.save()
+            return {'success': True}
+        else:
+            logger.error(f"Flutterwave refund failed: {response.text}")
+            return {'success': False, 'message': response.text}
+    
+    except Exception as e:
+        logger.error(f"Flutterwave refund error: {str(e)}")
+        return {'success': False, 'message': str(e)}
 
-                            if combo and combo.stock >= quantity:
-                                combo.stock -= quantity
-                                combo.save()
-
-                                # Update total product stock from all combinations
-                                total_combo_stock = sum(c.stock for c in VariationCombination.objects.filter(product=product))
-                                product.stock = total_combo_stock
-                                product.save()
-
-                    if request.session.get("cart_id"):
-                        del request.session["cart_id"]
-                        request.session.modified = True
-                payment = Payment.objects.create(
-                    user=order.user,
-                    paypal_order_id=order.paypal_order_id,
-                    transaction_id=payment_id,
-                    payment_method="PayPal",
-                    order_total=order.order_total,
-                    amount_paid=amount_paid,
-                    status=payment_status
-                )
-                order_products.update(payment=payment)
-                for order_product in order_products:
-                    cart_item = CartItem.objects.filter(user=order.user, product=order_product.product).first()
-                    if cart_item:
-                        order_product.variations.set(cart_item.variations.all())
-                order.payment = payment
-                order.save()
-            return JsonResponse({
-                "message": "Payment captured successfully!",
-                "order_id": order_id,
-                "status": payment_status,
-                "payment_id": payment_id
-            })
-        return JsonResponse({"error": "Payment ID not found in PayPal response."}, status=500)
-    return JsonResponse({"error": "Failed to capture PayPal order", "details": response_data}, status=response.status_code)
-
-def success(request):
-    return render(request, "orders/success.html")

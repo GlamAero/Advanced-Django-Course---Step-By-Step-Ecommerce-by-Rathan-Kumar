@@ -1,0 +1,150 @@
+{% extends "admin/change_form.html" %}
+
+{% block extrahead %}
+    {{ block.super }}
+    {{ custom_inline_js|safe }}
+
+    <style>
+        #id_product_type {
+            border-left: 5px solid #337ab7;
+            padding-left: 5px;
+            transition: border-color 0.3s ease;
+        }
+
+        .admin-alert {
+            background: #fff4e5;
+            color: #7a4c00;
+            padding: 10px;
+            border: 1px solid #f0c36d;
+            margin-top: 10px;
+            display: none;
+            border-radius: 4px;
+            font-size: 0.95em;
+        }
+
+        .variation-hint {
+            padding: 8px;
+            margin-top: 10px;
+            border-radius: 4px;
+            font-size: 0.95em;
+        }
+
+        .variation-hint.linked {
+            background: #e6f7ff;
+            border: 1px solid #91d5ff;
+            color: #00529b;
+        }
+
+        .variation-hint.missing {
+            background: #fff3cd;
+            border: 1px solid #ffe58f;
+            color: #856404;
+        }
+
+        .generate-combos-btn {
+            display: inline-block;
+            margin-top: 12px;
+            padding: 6px 12px;
+            background-color: rgb(18, 70, 18);
+            font-weight: 600;
+            border-radius: 4px;
+            text-decoration: none;
+        }
+
+        a.generate-combos-btn {
+            color: #f9f9f9 !important;
+        }
+
+        .generate-combos-btn:hover {
+            background-color: #317837;
+        }
+
+        .stock-recalc-form {
+            margin-top: 18px;
+        }
+
+        .stock-recalc-form button {
+            background-color: #00529b;
+            color: white;
+            font-weight: 600;
+            padding: 6px 12px;
+            border-radius: 4px;
+            border: none;
+        }
+
+        .stock-recalc-form button:hover {
+            background-color: #003f7f;
+        }
+    </style>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const productType = document.getElementById('id_product_type');
+            const priceRow = document.querySelector('.form-row.field-price');
+            const stockRow = document.querySelector('.form-row.field-stock');
+            const priceInput = document.getElementById('id_price');
+
+            const alertBox = document.createElement('div');
+            alertBox.className = 'admin-alert';
+            alertBox.innerText = 'Price is required for simple products.';
+
+            if (priceRow && priceRow.parentNode) {
+                priceRow.parentNode.insertBefore(alertBox, priceRow.nextSibling);
+            }
+
+            function updateUI() {
+                const type = productType?.value || 'simple';
+                const isSimple = type === 'simple';
+
+                if (priceRow) priceRow.style.display = isSimple ? 'block' : 'none';
+                if (stockRow) stockRow.style.display = isSimple ? 'block' : 'none';
+
+                alertBox.style.display = (isSimple && priceInput?.value === '') ? 'block' : 'none';
+
+                productType.style.borderLeftColor =
+                    type === 'variation' ? '#d58512' :
+                    type === 'combination' ? '#449d44' :
+                    '#337ab7';
+            }
+
+            productType?.addEventListener('change', updateUI);
+            priceInput?.addEventListener('input', updateUI);
+
+            updateUI();
+        });
+    </script>
+{% endblock %}
+
+{% block after_field_sets %}
+    <p class="variation-hint 
+       {% if original and original.product_type == 'combination' and original.variation_option_sets.all %}
+           linked
+       {% else %}
+           missing
+       {% endif %}">
+        {% if original and original.product_type == 'combination' and original.variation_option_sets.all %}
+            This combination-type product has variation options defined.
+        {% elif original and original.product_type == 'variation' %}
+            This is a variation-type product. Variants should be managed inline below.
+        {% else %}
+            This product has no variation options linked yet.
+        {% endif %}
+    </p>
+
+    {% if original and original.product_type == 'combination' and original.variation_option_sets.all %}
+        {% with option_set=original.variation_option_sets.first %}
+            <a href="{% url 'admin:variationoptionset_generate_combos' option_set.pk %}" class="generate-combos-btn">
+                🔧 Preview & Generate Combinations
+            </a>
+        {% endwith %}
+    {% endif %}
+
+    {% if original %}
+        <form method="post" action="{% url 'admin:recalculate_product_stock' original.pk %}" class="stock-recalc-form">
+            {% csrf_token %}
+            <button type="submit">🔁 Recalculate Stock</button>
+        </form>
+    {% endif %}
+    <br><br>
+{% endblock %}
+

@@ -1,333 +1,476 @@
-from django.shortcuts import render, redirect
-from .forms import RegistrationForm
-from .models import Account
-from django.contrib import messages, auth
+import logging
+import time
+from urllib.parse import urlparse
+
+from django.conf import settings
+from django.contrib import messages
+from django.contrib.auth import login as auth_login, logout as auth_logout, authenticate
 from django.contrib.auth.decorators import login_required
+from django.contrib.auth.tokens import default_token_generator
+from django.contrib.sites.shortcuts import get_current_site
+from django.core.mail import EmailMessage
+from django.http import HttpResponse, HttpResponseForbidden
+from django.shortcuts import render, redirect, get_object_or_404
+from django.template.loader import render_to_string
+from django.urls import reverse
+from django.utils.encoding import force_bytes, force_str
+from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode, url_has_allowed_host_and_scheme
+from django.views.decorators.csrf import csrf_protect
+from django.views.decorators.debug import sensitive_post_parameters
+from django_ratelimit.decorators import ratelimit
+from django_ratelimit.exceptions import Ratelimited
+from axes.decorators import axes_dispatch
+from django_otp.plugins.otp_static.models import StaticDevice
+
+from accounts.selectors import get_user_activity_summary
+from accounts.services import EmailSendError, send_activation_email
+
+from .forms import (
+    VendorRegistrationForm, CustomerRegistrationForm,
+    VendorLoginForm, CustomerLoginForm,
+    VendorProfileForm, CustomerProfileForm,
+    PasswordResetForm, SetPasswordForm
+)
+from .models import Account, VendorProfile, CustomerProfile
 from carts.models import Cart, CartItem
 from carts.views import _cart_id
-import requests
+from .decorators import customer_required, vendor_required
+from .utils import log_activity, get_client_ip
+from django.core.exceptions import ValidationError
+from django.contrib.auth.password_validation import validate_password
 
 
-# Verification email imports:
-from django.contrib.sites.shortcuts import get_current_site
-from django.template.loader import render_to_string
-from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
-from django.utils.encoding import force_bytes
-from django.contrib.auth.tokens import default_token_generator
-from django.core.mail import EmailMessage
+logger = logging.getLogger(__name__)
 
+# ========================
+# SESSION KEYS MANAGEMENT
+# ========================
+SESSION_2FA_USER_ID = '2fa_user_id'
+SESSION_2FA_REMEMBER_ME = '2fa_remember_me'
+SESSION_2FA_USER_TYPE = '2fa_user_type'
+SESSION_LAST_LOGIN_TYPE = 'last_login_type'
+SESSION_UID = 'uid'
 
+# ===================
+# UTILITY FUNCTIONS
+# ===================
+def ratelimit_handler(request, exception=None):
+    if isinstance(exception, Ratelimited):
+        return render(request, 'accounts/rate_limit.html', status=429)
+    return HttpResponseForbidden("Forbidden", status=403)
 
-# Create your views here.
+def _merge_cart_items(request, user):
+    try:
+        cart = Cart.objects.get(cart_id=_cart_id(request))
+        cart_items = CartItem.objects.filter(cart=cart)
+
+        if cart_items.exists():
+            user_cart_items = CartItem.objects.filter(user=user)
+            user_variation_map = {}
+            for u_item in user_cart_items:
+                key = (u_item.product.id, tuple(u_item.variations.values_list('id', flat=True)))
+                user_variation_map[key] = u_item
+
+            for item in cart_items:
+                key = (item.product.id, tuple(item.variations.values_list('id', flat=True)))
+                if key in user_variation_map:
+                    user_item = user_variation_map[key]
+                    user_item.quantity += item.quantity
+                    user_item.save()
+                    item.delete()
+                else:
+                    item.user = user
+                    item.save()
+    except Cart.DoesNotExist:
+        pass
+    except Exception as e:
+        logger.error(f"Error merging cart items for {user.email}: {e}")
+
+def _complete_login(request, user, user_type, remember_me):
+    auth_login(request, user)
+    request.session[SESSION_LAST_LOGIN_TYPE] = user_type
+    
+    if not remember_me:
+        request.session.set_expiry(settings.SESSION_COOKIE_AGE)
+    
+    _merge_cart_items(request, user)
+    log_activity(user, 'login', request)
+    messages.success(request, "Logged in successfully")
+    return _redirect_after_login(request, 'vendor_dashboard' if user_type == 'vendor' else 'home')
+
+def _complete_2fa_login(request, user, user_type, remember_me):
+    _complete_login(request, user, user_type, remember_me)
+    
+    # Clean up session
+    for key in [SESSION_2FA_USER_ID, SESSION_2FA_REMEMBER_ME, SESSION_2FA_USER_TYPE]:
+        request.session.pop(key, None)
+
+def _redirect_after_login(request, default_view):
+    next_url = request.GET.get('next') or request.POST.get('next')
+    
+    # Disallowed paths to prevent redirect attacks
+    DISALLOWED_PATHS = [
+        '/logout/',
+        '/admin/',
+        '/password/change/',
+        '/account/delete/'
+    ]
+    
+    if next_url and url_has_allowed_host_and_scheme(
+        url=next_url,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure()
+    ):
+        # Additional path validation
+        if any(next_url.startswith(path) for path in DISALLOWED_PATHS):
+            return redirect(default_view)
+        return redirect(next_url)
+    return redirect(default_view)
+
+def redirect_with_next(view_name, request):
+    url = reverse(view_name)
+    next_url = request.GET.get('next', '')
+    if next_url:
+        return redirect(f'{url}?next={next_url}')
+    return redirect(url)
+
+def is_vendor_url(url):
+    if not url:
+        return False
+    parsed = urlparse(url)
+    vendor_paths = ['/vendor/', '/dashboard/vendor/', '/manage/']
+    return any(path in parsed.path for path in vendor_paths)
+
+# =====================
+# VIEW FUNCTIONS
+# =====================
+def home_redirect_view(request):
+    if request.user.is_authenticated:
+        if request.user.is_vendor():
+            return redirect('vendor_dashboard')
+        return redirect('home')
+    return render(request, 'home.html')
+
+@customer_required
+def customer_dashboard(request):
+    return render(request, 'accounts/customer_dashboard.html', {
+        'user': request.user,
+        'profile': request.user.customerprofile
+    })
+
+@vendor_required
+def vendor_dashboard(request):
+    return render(request, 'accounts/vendor_dashboard.html')
+
+@vendor_required
+def vendor_profile(request):
+    profile, _ = VendorProfile.objects.get_or_create(
+        user=request.user,
+        defaults={'company_name': request.user.email}
+    )
+    
+    if request.method == 'POST':
+        form = VendorProfileForm(request.POST, request.FILES, instance=profile)
+        if form.is_valid():
+            form.save()
+            log_activity(request.user, 'profile_update', request)
+            messages.success(request, "Vendor profile updated successfully")
+            return redirect('vendor_dashboard')
+        messages.error(request, "Please correct the errors below")
+    else:
+        form = VendorProfileForm(instance=profile)
+    
+    return render(request, 'accounts/vendor_profile.html', {'form': form})
+
+@customer_required
+def customer_profile(request):
+    profile, _ = CustomerProfile.objects.get_or_create(
+        user=request.user,
+        defaults={}
+    )
+    
+    if request.method == 'POST':
+        form = CustomerProfileForm(request.POST, request.FILES, instance=profile)
+        if form.is_valid():
+            form.save()
+            log_activity(request.user, 'profile_update', request)
+            messages.success(request, "Customer profile updated successfully")
+            return redirect('customer_dashboard')
+        messages.error(request, "Please correct the errors below")
+    else:
+        form = CustomerProfileForm(instance=profile)
+
+    context = { 'form': form, 'activity_summary': get_user_activity_summary(request.user) }
+    
+    return render(request, 'accounts/customer_profile.html', context)
 
 def register(request):
-    if request.method == 'POST':
-        form = RegistrationForm(request.POST)
+    role = request.GET.get('role', 'customer')
+    if role not in ['vendor', 'customer']:
+        messages.error(request, "Invalid role selected")
+        return redirect('home')
 
-        # 'form.is_valid()' checks if the form data is valid according to the validation rules defined in the form class.
+    form_class = VendorRegistrationForm if role == 'vendor' else CustomerRegistrationForm
+
+    if request.method == 'POST':
+        form = form_class(request.POST)
         if form.is_valid():
-
-            # 'form.cleaned_data' is a dictionary that contains the cleaned and validated data(when the user has filled in 'forms.py') from the form. It is used to access the individual fields of the form after validation.
-            first_name = form.cleaned_data['first_name']
-            last_name = form.cleaned_data['last_name']
-            phone_number = form.cleaned_data['phone_number']
-            email = form.cleaned_data['email']
-            password = form.cleaned_data['password']
-
-            # USE EMAIL PREFIX AS USERNAME:
-            # 'username' is created by splitting the email address at the '@' symbol and taking the first part[0], which is typically the user's name or identifier before the '@' in their email address.
-            # 'username' is used as a unique identifier for the user in the system, and it is derived from the email address to ensure that it is unique and meaningful.
-            username = email.split('@')[0]  
-            
-
-            # Create a new user instance using the custom user manager
-            # 'Account.objects.create_user' is a method that creates a new user instance in the database using the custom user manager defined in 'models.py'. 
-            # Note that phone number is not here. This is because in the 'models.py' file, in the function 'create_user', phone number is not a field. However, phone number is added separately.
-            user = Account.objects.create_user(
-                first_name=first_name,
-                last_name=last_name,
-                email=email,
-                username = username,
-                password=password
-            )
-
-            # Set additional user attributes
-            # 'user.phone_number' is set to the phone number provided in the registration form. This allows the user to have a phone number associated with their account.
-            # This is useful for account recovery, notifications, or any other purpose where a phone number might be needed.
-            # However, it is important to note that the phone number field is optional, as indicated by the 'blank=True' attribute in the 'Account' model.
-            user.phone_number = phone_number
-
-            # Save the form data to the database
+            user = form.save(commit=False)
+            user.role = role
+            user.is_active = False
             user.save()
-
-
-            # USER ACTIVATION AFTER REGISTRATION:
-
-            # Get the current site domain
-            current_site = get_current_site(request)
-            mail_subject = "Please activate your account"
-
-            # 'render_to_string' is a function that renders a template with the given context data and returns the rendered HTML as a string.
-            message = render_to_string('accounts/account_verification_email.html', {
-                'user': user,
-                'domain': current_site,
-                'uid': urlsafe_base64_encode(force_bytes(user.pk)),
-                'token': default_token_generator.make_token(user),
-            })
-
-            # 'to_email' is the email address which the activation email will be sent to.
-            to_email = email
-            send_email = EmailMessage(
-                mail_subject, message, to=[to_email]
-            )
-            send_email.send()
-
-
-            # '?command=verification&email='+email' is part of the content in the user's browser url after they registered and are sent the verification email.
-            # this means the user has not yet verified themselves by checking their mail and has not clicked the link sent to them to verify.
-            # to login and get authenticated, the user needs to click the link in their email. That link verifies them and redirects them to 'login' page to login. This is evident in the function 'activate' below
-
-            # the below 'return redirect' sends the user to the 'login.html' page but a unique one with '?command=verification&email='+email', where '+email' concatenates as the email of the user the email is sent to as given above. This is evident in accounts/login.html page.
-            return redirect('/accounts/login/?command=verification&email='+email)
-            
-    else:
-        form = RegistrationForm()
-
-    context = {
-        'form' : form
-    }
-    return render(request, 'accounts/register.html', context)
-
-
-
-def login(request):
-    if request.method == 'POST':
-        email = request.POST['email']
-        password = request.POST['password']
-
-        # Authenticate the user
-        user = auth.authenticate(request, username=email, password=password)
-        
-        # If the user is found in the database:
-        if user is not None:
-            try:
-                # get the cart objects and cart_items of the user whose accounts details is found in the database from the database
-                cart = Cart.objects.get(cart_id=_cart_id(request))
-
-                is_cart_item_exists = CartItem.objects.filter(cart=cart).exists()
-
-                # BEFORE LOGGING A USER IN, CHECK IF THERE IS/ARE CART ITEMS ASSOCIATED WITH A CART OF A UNIQUE 'cart_id' AS ABOVE:
-                if is_cart_item_exists:
-
-                    # use the 'cart' alone to get the CartItem objects. 
-                    # That is 'cart_item' here is all the items in a particular cart of a unique 'cart_id' (e.g AIR JORDAN of color: blue and size: medium;  RTX SHIRT of color: red and size: small;  VIVO JEANS of color: green and size: large etc.).
-                    # This cart item is not yet linked to a user
-                    cart_item = CartItem.objects.filter(cart=cart)
-
-
-                    # GETTING THE PRODUCT VARIATION BY 'cart_id':
-
-                    product_variation = []
-
-                    # for each item(e.g Air Jordan of color: blue and size: medium of quantity: 3) in the particular cart of a unique cart_id
-                    for item in cart_item:
-
-                        # 'item.variations.all' here return all the variations of each product in the cart. (For example color: blue and size: medium  -- for RTX SHIRT)
-                        variation = item.variations.all()
-                        
-                        product_variation.append(list(variation))
-
-
-                    # FOR A USER WHO IS ABOUT TO LOG IN, GET THE Cart_Item OF THE USER TO ACCESS HIS PRODUCT VARIATION:
-                    cart_item = CartItem.objects.filter(user=user) 
-
-                    ex_var_list = [] # Stores variations of each cart item
-                    id = [] # Stores IDs of cart items
-
-                    # From the above, 'cart_item' is a collection (queryset) of CartItem objects (e.g Air Jordan of color: Black and size: Medium, Air Jordan of color: White and size: Medium, Air Jordan of color: Yellow and size: Large) that the user who is logging in has in their cart
-
-                    # Here, 'item' represents each individual CartItem during iteration (e.g. Air Jordan of color: Black and size: Medium) that the user who is about logging in has in their cart
-                    for item in cart_item:
-
-                        # this means the all the variations of each item in the cart of the user about to log in(e.g color: black, size: red, etc of product ATX Shirt that was added to cart previously by the user in the previous cart_session)
-                        existing_variation = item.variations.all()
-                        
-                        ex_var_list.append(list(existing_variation))
-
-                        id.append(item.id)
-
-                        # for each item variation in the list of variations in a given cart before log in:
-                    for pr in product_variation:
-
-                        # if an item variation(that is in the list of variations in a given cart before log in) is found in the list of item variations of a particular user(when they previously logged in and added to cart):
-                        if pr in ex_var_list:
-
-                            index = ex_var_list.index(pr)
-
-                            item_id = id[index]
-
-                            item = CartItem.objects.get(id  = item_id)
-
-                            item.quantity += 1
-
-                            item.user = user
-
-                            item.save()
-
-                            # if an item variation(that is in the list of variations in a given cart before log in) is not found in the list of item variations of a particular user(when they previously logged in and added to cart):
-                        else:
-                            cart_item = CartItem.objects.filter(cart=cart)
-
-                            for item in cart_item:
-                                item.user = user
-                                item.save()  
-                    
-            except:
-                pass
-
-            # log them in
-            auth.login(request, user)
-            messages.success(request, "You are now logged in")
-
-            # IF WE ARE VISITING ANY PAGE WHICH REQUIRES TO LOGIN FIRST TO VIEW THE PAGE:
-            # the below will hold the url of any previous page was referring to(or was trying to get access to) which requires login(for example, if a user who is not logged in is trying to access the checkout page after adding to cart, he or she would be redirected to 'login' page and thereafter 'dashboard' page which 'login' page leads to. 
-            # However, with this, this url now holds the original url(e.g checkout) which the user intended to go to
-            url = request.META.get('HTTP_REFERER')
-
-            try:
                 
-                query = requests.utils.urlparse(url).query # next=/cart/checkout/
-                
-                # the below converts the query above to a dictionary:
-                params = dict(x.split('=') for x in query.split('&')) # {'next': '/cart/checkout/'}
+            try:
+                send_activation_email(user, request)
+                messages.success(request, "Registration successful! Please check your email to activate your account.")
+            except EmailSendError:
+                messages.error(request, "Failed to send activation email. Please try again or contact support")
 
-                if 'next' in params:
-                    nextPage = params['next']
-                    return redirect(nextPage)
-
-            except:
-                return redirect('dashboard')
-            
-        else:
-            messages.error(request, "Invalid login credentials")
-            return redirect('login')
-        
-    return render(request, 'accounts/login.html')
-
-
-
-@login_required(login_url = 'login')
-def logout(request):
-    auth.logout(request)
-    messages.success(request, 'You are logged out.')
-    return redirect('login')
-
-
-# This function 'activate' is called in 'account_verification_email.html' as part of the url link the user clicks in order to activate their account.
-def activate(request, uidb64, token):
-    try:
-        uid = urlsafe_base64_decode(uidb64).decode()
-        # '_default_manager' here is 
-        user = Account._default_manager.get(pk=uid)
-    except (TypeError, ValueError, OverflowError, Account.DoesNotExist):
-        user = None
-    if user is not None and default_token_generator.check_token(user, token):
-        user.is_active = True
-        user.save()
-        messages.success(request, 'Your account has been activated successfully.')
-        return redirect('login')
+            return redirect('vendor_login' if role == 'vendor' else 'customer_login')
     else:
-        messages.error(request, 'Activation link is invalid!')
-        return redirect('register')
+        form = form_class()
 
+    return render(request, 'accounts/register.html', {'form': form, 'role': role})
 
-@login_required(login_url='login')
-def dashboard(request):
+def _handle_login(request, form, user_type):
+    """Shared login handling for both vendor and customer"""
+    if request.user.is_authenticated:
+        if user_type == 'vendor' and request.user.is_vendor():
+            return _redirect_after_login(request, 'vendor_dashboard')
+        return _redirect_after_login(request, 'home')
     
-    return render(request, 'accounts/dashboard.html') 
+    next_url = request.GET.get('next', '')
+    
+    if request.method == 'POST' and form.is_valid():
+        email = form.cleaned_data.get('email')
+        password = form.cleaned_data.get('password')
+        remember_me = form.cleaned_data.get('remember_me')
+        user = authenticate(request, username=email, password=password)
+        
+        if not user:
+            messages.error(request, "Invalid credentials")
+            time.sleep(1.5)
+            return render(request, f'accounts/{user_type}_login.html', {'form': form})
+        
+        # Validate user type
+        if user_type == 'vendor' and not user.is_vendor():
+            messages.error(request, "This account is not registered as a vendor")
+            return render(request, f'accounts/{user_type}_login.html', {'form': form})
+        elif user_type == 'customer' and user.is_vendor():
+            messages.error(request, "Please use vendor login")
+            return render(request, f'accounts/{user_type}_login.html', {'form': form})
+        
+        # Validate account status
+        if not user.is_active:
+            messages.error(request, "Account deactivated")
+            return render(request, f'accounts/{user_type}_login.html', {'form': form})
+        
+        if not user.email_verified:
+            messages.warning(request, "Please verify your email address")
+            return render(request, f'accounts/{user_type}_login.html', {'form': form})
+        
+        # Handle 2FA
+        if user.requires_2fa:
+            request.session[SESSION_2FA_USER_ID] = user.id
+            request.session[SESSION_2FA_REMEMBER_ME] = remember_me
+            request.session[SESSION_2FA_USER_TYPE] = user_type
+            return redirect('two_factor_verify')
+        
+        # Complete regular login
+        return _complete_login(request, user, user_type, remember_me)
+    
+    return render(request, f'accounts/{user_type}_login.html', {
+        'form': form,
+        'next': next_url
+    })
 
 
-def forgotPassword(request):
-    if request.method == 'POST':
-        email = request.POST['email']
-        if Account.objects.filter(email=email).exists():
+@axes_dispatch
+@ratelimit(key='post:email', rate='5/m', block=True)
+@sensitive_post_parameters()
+@csrf_protect
+def vendor_login_view(request):
+    form = VendorLoginForm(request.POST or None)
+    return _handle_login(request, form, 'vendor')
 
 
-            # RESET PASSWORD EMAIL
-
-            # '_exact' means the email should be case sensitive.
-            # if it were '_iexact' it means the email should be case insensitive.
-            user = Account.objects.get(email__exact=email)
-
-            current_site = get_current_site(request)
-            mail_subject = "Please reset your password"
-
-            # 'render_to_string' is a function that renders a template with the given context data and returns the rendered HTML as a string.
-            message = render_to_string('accounts/reset_password_email.html', {
-                'user': user,
-                'domain': current_site,
-                'uid': urlsafe_base64_encode(force_bytes(user.pk)),
-                'token': default_token_generator.make_token(user),
-            })
-
-            # 'to_email' is the email address which the reset_password email will be sent to.
-            to_email = email
-            send_email = EmailMessage(
-                mail_subject, message, to=[to_email]
-            )
-            send_email.send()
-
-            messages.success(request, 'Password reset email has been sent to your email address')
-            return redirect('login')
-
-        else:
-            messages.error(request, 'Account does not exist!')
-            return redirect('forgotPassword')
-
-    return render(request, 'accounts/forgotPassword.html')
+@axes_dispatch
+@ratelimit(key='post:email', rate='5/m', block=True)
+@sensitive_post_parameters()
+@csrf_protect
+def customer_login_view(request):
+    form = CustomerLoginForm(request.POST or None)
+    return _handle_login(request, form, 'customer')
 
 
-def resetpassword_validate(request, uidb64, token):
+@ratelimit(key='ip', rate='5/h')
+def two_factor_verify(request):
+    user_id = request.session.get(SESSION_2FA_USER_ID)
+    remember_me = request.session.get(SESSION_2FA_REMEMBER_ME, False)
+    user_type = request.session.get(SESSION_2FA_USER_TYPE, 'customer')
+    
+    if not user_id:
+        messages.error(request, "Session expired")
+        return redirect('vendor_login' if user_type == 'vendor' else 'customer_login')
+    
     try:
-        uid = urlsafe_base64_decode(uidb64).decode()
-        # '_default_manager' here is 
+        user = Account.objects.get(id=user_id)
+    except Account.DoesNotExist:
+        messages.error(request, "Invalid session")
+        return redirect('vendor_login' if user_type == 'vendor' else 'customer_login')
+    
+    backup_device, created = StaticDevice.objects.get_or_create(
+        user=user, 
+        name='backup'
+    )
+    
+    backup_tokens = list(backup_device.token_set.values_list('token', flat=True))
+    if not backup_tokens:
+        backup_device.generate_tokens(10)
+        backup_tokens = list(backup_device.token_set.values_list('token', flat=True))
+    
+    if request.method == 'POST':
+        token = request.POST.get('token')
+        if user.verify_token(token):
+            _complete_2fa_login(request, user, user_type, remember_me)
+            return redirect('vendor_dashboard' if user_type == 'vendor' else 'home')
+        else:
+            if token in backup_tokens:
+                backup_device.token_set.filter(token=token).delete()
+                _complete_2fa_login(request, user, user_type, remember_me)
+                return redirect('vendor_dashboard' if user_type == 'vendor' else 'home')
+            else:
+                messages.error(request, "Invalid code")
+    
+    return render(request, 'accounts/two_factor_verify.html', {
+        'backup_tokens': backup_tokens
+    })
+
+
+def login_redirect(request):
+    user_type = request.GET.get('type', '').lower()
+    if user_type == 'vendor':
+        return redirect_with_next('vendor_login', request)
+    if user_type == 'customer':
+        return redirect_with_next('customer_login', request)
+    
+    next_url = request.GET.get('next', '')
+    if is_vendor_url(next_url):
+        return redirect_with_next('vendor_login', request)
+    
+    referer = request.META.get('HTTP_REFERER', '')
+    if is_vendor_url(referer):
+        return redirect_with_next('vendor_login', request)
+    
+    if request.session.get(SESSION_LAST_LOGIN_TYPE) == 'vendor':
+        return redirect_with_next('vendor_login', request)
+    
+    return redirect_with_next('customer_login', request)
+
+def logout_view(request):
+    if not request.user.is_authenticated:
+        return redirect('home')
+    
+    log_activity(request.user, 'logout', request)
+    
+    session_keys = [
+        SESSION_LAST_LOGIN_TYPE,
+        SESSION_2FA_USER_ID,
+        SESSION_2FA_REMEMBER_ME,
+        SESSION_UID
+    ]
+    for key in session_keys:
+        request.session.pop(key, None)
+    
+    auth_logout(request)
+    messages.success(request, "Logged out successfully")
+    return redirect('home')
+
+
+def activate(request, uidb64, token):
+    """
+    Activate user account if the token is valid and the user is not already verified.
+    """
+    try:
+        uid = force_str(urlsafe_base64_decode(uidb64))
         user = Account._default_manager.get(pk=uid)
     except (TypeError, ValueError, OverflowError, Account.DoesNotExist):
         user = None
 
-    if user is not None and default_token_generator.check_token(user, token):
-
-        # pass/save the 'uid' into request.session
-        request.session['uid'] = uid
-        messages.success(request, 'Please reset your password')
-
-        return redirect('resetPassword')
-    else:
-        messages.error(request, 'This link is expired')
-        return redirect('login')
-
-
-def resetPassword(request):
-    if request.method == 'POST':
-        password = request.POST['password']
-        confirm_password = request.POST['confirm_password']
-
-        if password == confirm_password:
-
-            # get/retrieve the 'uid' from the session in function- 'resetpassword_validate' and pass it as 'uid'
-            uid = request.session.get('uid')
-            user = Account.objects.get(pk=uid)
-
-            # use django default function- 'set_password()' to set the password and save it in the hashed format
-            user.set_password(password)
-            
+    if user and default_token_generator.check_token(user, token):
+        if not user.email_verified:  # Prevent re-activation
+            user.email_verified = True
+            user.is_active = True  # Ensure account is active upon activation
             user.save()
-            messages.success(request, 'Password reset successful')
-            return redirect('login')
+            log_activity(user, 'account_activated', request)
+            messages.success(request, "Account activated successfully")
+            auth_login(request, user)
+            return redirect('vendor_dashboard' if user.is_vendor() else 'customer_dashboard')
         else:
-            messages.error(request, 'Passwords do not match')
-            return redirect('resetPassword')
+            messages.info(request, "Account already activated")
+            return redirect('login')
     else:
-        return render(request, 'accounts/resetPassword.html')
+        messages.error(request, "Invalid or expired activation link")
+        return redirect('home')
 
 
+def forgot_password(request):
+    if request.method == 'POST':
+        form = PasswordResetForm(request.POST)
+        if form.is_valid():
+            email = form.cleaned_data.get('email')
+            if Account.objects.filter(email=email).exists():
+                user = Account.objects.get(email__iexact=email)
+                current_site = get_current_site(request)
+                message = render_to_string('accounts/reset_password_email.html', {
+                    'user': user,
+                    'domain': current_site.domain,
+                    'uid': urlsafe_base64_encode(force_bytes(user.pk)),
+                    'token': default_token_generator.make_token(user),
+                })
+                EmailMessage("Password Reset", message, to=[email]).send()
+                log_activity(user, 'password_reset_requested', request)
+                messages.success(request, "Password reset email sent")
+                return redirect('customer_login')
+        messages.error(request, "Email not found")
+    else:
+        form = PasswordResetForm()
+    return render(request, 'accounts/forgot_password.html', {'form': form})
+
+def reset_password_validate(request, uidb64, token):
+    try:
+        uid = force_str(urlsafe_base64_decode(uidb64))
+        user = Account._default_manager.get(pk=uid)
+    except (TypeError, ValueError, OverflowError, Account.DoesNotExist):
+        user = None
+
+    if user and default_token_generator.check_token(user, token):
+        request.session[SESSION_UID] = uid
+        messages.info(request, "Please reset your password")
+        return redirect('reset_password')
+    else:
+        messages.error(request, "Invalid reset link")
+        return redirect('customer_login')
+
+def reset_password(request):
+    uid = request.session.get(SESSION_UID)
+    if not uid:
+        messages.error(request, "Session expired. Please try resetting your password again.")
+        return redirect('forgot_password')
+    
+    user = get_object_or_404(Account, pk=uid)
+    
+    if request.method == 'POST':
+        form = SetPasswordForm(request.POST)
+        if form.is_valid():
+            password = form.cleaned_data.get('new_password')
+            user.set_password(password)
+            user.save()
+            log_activity(user, 'password_reset', request)
+            del request.session[SESSION_UID]
+            messages.success(request, "Password reset successful. Please log in with your new password.")
+            return redirect('customer_login')
+    else:
+        form = SetPasswordForm()
+    
+    return render(request, 'accounts/reset_password.html', {'form': form})

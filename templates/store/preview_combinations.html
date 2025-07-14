@@ -1,0 +1,98 @@
+{% extends "admin/change_form.html" %}
+{% load i18n static dict_filters %}
+
+{% block content %}
+<div class="container" style="max-width: 1024px; margin: 0 auto;">
+  <h1 style="margin-bottom: 20px;">🔧 {{ title|default:"Variation Combination Preview" }}</h1>
+
+  <!--Toggle to control inclusion of existing combinations -->
+  <form method="get" style="margin-bottom: 20px;">
+    <label>
+      <input type="checkbox" name="include_existing" value="true"
+             {% if request.GET.include_existing == "true" %}checked{% endif %} />
+      Show existing combinations
+    </label>
+    <button type="submit" class="button">Apply</button>
+  </form>
+
+  <p><strong>Product:</strong> {{ option_set.product }}</p>
+  <p><strong>Total Combinations:</strong> {{ preview_rows|length }}</p>
+
+  <form method="POST">
+    {% csrf_token %}
+    <input type="hidden" name="total_combos" value="{{ preview_rows|length }}">
+
+    <fieldset class="module aligned">
+      <legend>Bulk Settings & Export Options</legend>
+      {% if option_set.product.product_type == 'combination' %}
+        <div class="form-row">
+          <label for="bulk_price">Default Price:</label>
+          <input type="number" name="bulk_price" step="0.01" class="vTextField" placeholder="e.g. 19.99" />
+        </div>
+        <div class="form-row">
+          <label for="bulk_stock">Default Stock:</label>
+          <input type="number" name="bulk_stock" class="vTextField" placeholder="e.g. 50" />
+        </div>
+      {% endif %}
+      <div class="form-row"><input type="checkbox" name="replace_existing" /> Replace existing combinations with same SKU</div>
+      <div class="form-row"><input type="checkbox" name="export_csv" /> Export created SKUs as CSV after saving</div>
+      <div class="form-row"><input type="checkbox" name="export_skipped" /> Export skipped duplicate SKUs as CSV</div>
+      <div class="form-row"><input type="checkbox" name="send_summary_email" /> Send summary email after save</div>
+    </fieldset>
+
+    <fieldset class="module">
+      <legend>Preview Generated Combinations</legend>
+      <table class="admin-table" style="width: 100%; border-collapse: collapse; margin-top: 10px;">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>SKU</th>
+            {% for label in option_labels %}
+              <th>{{ label }}</th>
+            {% endfor %}
+            <th>Price</th>
+            <th>Stock</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for sku_key in preview_rows %}
+            {% with row=prefill_data|dict_get:sku_key %}
+              <tr class="{% if row.existing %}existing-row{% else %}new-row{% endif %}">
+                <td>{{ forloop.counter }}</td>
+                <td>{{ sku_key }}</td>
+                {% for var in row.variations %}
+                  <td>{{ var.variation_value }}</td>
+                {% endfor %}
+                <td>
+                  <input type="number" step="0.01" name="price_{{ forloop.counter0 }}" class="vTextField"
+                         placeholder="e.g. 19.99" value="{{ row.price|default_if_none:'' }}" />
+                </td>
+                <td>
+                  <input type="number" name="stock_{{ forloop.counter0 }}" class="vTextField"
+                         placeholder="e.g. 50" value="{{ row.stock|default_if_none:'' }}" />
+                </td>
+                <td>
+                  <span style="color: {{ row.existing|yesno:'gray,green' }};">
+                    {{ row.existing|yesno:'Existing,New' }}
+                  </span>
+                </td>
+              </tr>
+            {% endwith %}
+          {% endfor %}
+        </tbody>
+      </table>
+    </fieldset>
+
+    <div style="margin-top: 20px;">
+      <button type="submit" class="button default">Generate & Save Combinations</button>
+    </div>
+
+    <style>
+      .existing-row { background-color: #f9f9f9; }
+      .new-row { background-color: #eaffea; }
+    </style>
+  </form>
+</div>
+{% endblock %}
+

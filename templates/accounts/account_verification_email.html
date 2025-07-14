@@ -1,8 +1,50 @@
 <!--This page is referenced in the function- 'register' in view.py file of the 'Account' app. It is the email for the activation of the registered account-->
 <!--'autoescape' helps to prevent cross site scripting: a situation where hackers send in malicious content(e.g a url link) into a website. And upon clicking that link, the hacker has access to the user details and other information -->
 {% autoescape off %}
-    Hi {{ user.first_name }},
-    Please click on the below link to confirm your registration.
-    http://{{ domain }}{% url 'activate' uidb64=uid token=token %}
-    If you think it is not you please ignore this email.
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Account Verification - PogosMarketPlace</title>
+    <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        .header { background-color: #f8f9fa; padding: 20px; text-align: center; }
+        .content { padding: 30px; background-color: #fff; }
+        .button { display: inline-block; padding: 10px 20px; background-color: #007bff; 
+                  color: white; text-decoration: none; border-radius: 4px; margin: 20px 0; }
+        .footer { margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee; 
+                  font-size: 0.9em; color: #6c757d; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h2>Welcome to PogosMarketPlace</h2>
+        </div>
+        
+        <div class="content">
+            <p>Hi {{ user.first_name }},</p>
+            <p>Thank you for registering with PogosMarketPlace. To complete your registration, please verify your email address by clicking the button below:</p>
+            
+            <p>
+                <a href="http://{{ domain }}{% url 'activate' uidb64=uid token=token %}" 
+                   class="button" aria-label="Verify your email address">
+                    Verify Email Address
+                </a>
+            </p>
+            
+            <p>If you can't click the button, copy and paste this URL into your browser:</p>
+            <p><code>http://{{ domain }}{% url 'activate' uidb64=uid token=token %}</code></p>
+            
+            <p>If you didn't create an account with PogosMarketPlace, please ignore this email.</p>
+        </div>
+        
+        <div class="footer">
+            <p>© {% now "Y" %} PogosMarketPlace. All rights reserved.</p>
+            <p>This is an automated message - please do not reply directly to this email.</p>
+        </div>
+    </div>
+</body>
+</html>
 {% endautoescape %}
